@@ -1,341 +1,331 @@
-# Solana Program Examples
+# Quicknode Solana Program Examples
 
-## Solana onchain program examples for ⚓ Anchor, 💫 Quasar, 🤥 Pinocchio, and 🦀 Native Rust.
+> A fork of the [Solana Foundation program examples](https://github.com/solana-developers/program-examples) with current versions, more programs, and additional frameworks.
 
-[![Anchor](https://github.com/solana-developers/program-examples/actions/workflows/anchor.yml/badge.svg?event=schedule)](https://github.com/solana-developers/program-examples/actions/workflows/anchor.yml) [![Quasar](https://github.com/solana-developers/program-examples/actions/workflows/solana-quasar.yml/badge.svg?event=schedule)](https://github.com/solana-developers/program-examples/actions/workflows/solana-quasar.yml) [![Pinocchio](https://github.com/solana-developers/program-examples/actions/workflows/solana-pinocchio.yml/badge.svg?event=schedule)](https://github.com/solana-developers/program-examples/actions/workflows/solana-pinocchio.yml) [![Native](https://github.com/solana-developers/program-examples/actions/workflows/solana-native.yml/badge.svg?event=schedule)](https://github.com/solana-developers/program-examples/actions/workflows/solana-native.yml)
+[![Anchor](../../actions/workflows/anchor.yml/badge.svg)](../../actions/workflows/anchor.yml) [![Quasar](../../actions/workflows/quasar.yml/badge.svg)](../../actions/workflows/quasar.yml) [![Pinocchio](../../actions/workflows/pinocchio.yml/badge.svg)](../../actions/workflows/pinocchio.yml) [![Native](../../actions/workflows/native.yml/badge.svg)](../../actions/workflows/native.yml)
 
-This repo contains Solana onchain programs (referred to as 'Smart Contracts' in other blockchains).
+Each example is available in one or more of the following frameworks:
+
+- [⚓ Anchor](https://www.anchor-lang.com/) — the most popular framework for Solana development. Build with `anchor build`, test with `pnpm test` as defined in `Anchor.toml`.
+- [💫 Quasar](https://quasar-lang.com/docs) — a newer, more performant framework with Anchor-compatible ergonomics. Run `pnpm test` to execute tests.
+- [🤥 Pinocchio](https://github.com/febo/pinocchio) — a zero-copy, zero-allocation library for Solana programs. Run `pnpm test` to execute tests.
+- [🦀 Native Rust](https://docs.solana.com/) — vanilla Rust using Solana's native crates. Run `pnpm test` to execute tests.
 
 > [!NOTE]
-> If you're new to Solana, you don't need to create your own programs to perform basic things like making accounts, creating tokens, sending tokens, or minting NFTs. These common tasks are handled with existing programs, for example the System Program (for making account or transferring SOL) or the token program (for creating tokens and NFTs). See the [Solana Developer site](https://solana.com/developers) to learn more.
+> You don't need to write your own program for basic tasks like creating accounts, transferring SOL, or minting tokens. These are handled by existing programs like the System Program and Token Program.
 
-Each folder includes examples for one or more of the following:
+## Financial Software
 
-- `anchor` - Written using [Anchor](https://www.anchor-lang.com/), the most popular framework for Solana development, which uses Rust.
-  Use `anchor build` and `anchor deploy` to build and deploy the program.
-  Tests should be executed using `pnpm test` as defined in the `Anchor.toml` scripts section.
+### Automated Market Maker
 
-- `quasar` - Written using [Quasar](https://github.com/blueshift-gg/quasar), a zero-copy, zero-allocation `no_std` framework for Solana programs with Anchor-compatible ergonomics.
-  Build and test commands are the same as native examples.
-  Run `pnpm test` to execute tests.
+Constant product AMM (x·y=k) — create liquidity pools, deposit and withdraw liquidity, swap tokens with fees and slippage protection.
 
-- `pinocchio` - Written using [Pinocchio](https://github.com/febo/pinocchio), a zero-copy, zero-allocation library for Solana programs.
-  Build and test commands are the same as native examples.
-  Run `pnpm test` to execute tests.
+[⚓ Anchor](./tokens/token-swap/anchor) [💫 Quasar](./tokens/token-swap/quasar)
 
-- `native` - Written using Solana's native Rust crates and vanilla Rust.
-  Build and test commands are defined via pnpm scripts and use `litesvm` for testing.
-  Run `pnpm test` to execute tests.
+### Escrow
 
+Peer-to-peer OTC trade — one user deposits token A and specifies how much token B they want. A counterparty fulfils the offer and both sides receive their tokens atomically.
 
-**If a given example is missing, please send us a PR to add it!** Our aim is to have every example available in every option. We'd also love to see more programs involving staking, wrapped tokens, oracles, compression and VRF. Follow the [contributing guidelines](./CONTRIBUTING.md) to keep things consistent.
+[⚓ Anchor](./tokens/escrow/anchor) [💫 Quasar](./tokens/escrow/quasar) [🦀 Native](./tokens/escrow/native)
 
-## The example programs
+### Token Fundraiser
+
+Create a fundraiser specifying a target mint and amount. Contributors deposit tokens until the goal is reached.
+
+[⚓ Anchor](./tokens/token-fundraiser/anchor) [💫 Quasar](./tokens/token-fundraiser/quasar)
+
 ## Basics
-### Hello world
 
-Hello World on Solana! A minimal program that logs a greeting.
+### Hello Solana
 
-[Anchor](./basics/hello-solana/anchor) [Quasar](./basics/hello-solana/quasar) [Pinocchio](./basics/hello-solana/pinocchio) [Native](./basics/hello-solana/native)
+A minimal program that logs a greeting.
 
-### Account-data
+[⚓ Anchor](./basics/hello-solana/anchor) [💫 Quasar](./basics/hello-solana/quasar) [🤥 Pinocchio](./basics/hello-solana/pinocchio) [🦀 Native](./basics/hello-solana/native)
+
+### Account Data
 
 Store and retrieve data using Solana accounts.
 
-[Anchor](./basics/account-data/anchor) [Quasar](./basics/account-data/quasar) [Pinocchio](./basics/account-data/pinocchio) [Native](./basics/account-data/native)
+[⚓ Anchor](./basics/account-data/anchor) [💫 Quasar](./basics/account-data/quasar) [🤥 Pinocchio](./basics/account-data/pinocchio) [🦀 Native](./basics/account-data/native)
 
-### Storing global state - Counter
+### Counter
 
-Use a PDA to store global state, making a counter that increments when called.
+Use a PDA to store global state — a counter that increments when called.
 
-[Anchor](./basics/counter/anchor) [Quasar](./basics/counter/quasar) [Pinocchio](./basics/counter/pinocchio) [Native](./basics/counter/native)
+[⚓ Anchor](./basics/counter/anchor) [💫 Quasar](./basics/counter/quasar) [🤥 Pinocchio](./basics/counter/pinocchio) [🦀 Native](./basics/counter/native)
 
-### Saving per-user state - Favorites
+### Favorites
 
-Save and update per-user state on the blockchain, ensuring users can only update their own information.
+Save and update per-user state, ensuring users can only modify their own data.
 
-[Anchor](./basics/favorites/anchor) [Quasar](./basics/favorites/quasar) [Pinocchio](./basics/favorites/pinocchio) [Native](./basics/favorites/native)
+[⚓ Anchor](./basics/favorites/anchor) [💫 Quasar](./basics/favorites/quasar) [🤥 Pinocchio](./basics/favorites/pinocchio) [🦀 Native](./basics/favorites/native)
 
-### Checking Instruction Accounts
+### Checking Accounts
 
-Check that the accounts provided in incoming instructions meet particular criteria.
+Validate that accounts provided in incoming instructions meet specific criteria.
 
-[Anchor](./basics/checking-accounts/anchor) [Quasar](./basics/checking-accounts/quasar) [Pinocchio](./basics/checking-accounts/pinocchio) [Native](./basics/checking-accounts/native)
+[⚓ Anchor](./basics/checking-accounts/anchor) [💫 Quasar](./basics/checking-accounts/quasar) [🤥 Pinocchio](./basics/checking-accounts/pinocchio) [🦀 Native](./basics/checking-accounts/native)
 
-### Closing Accounts
+### Close Account
 
-Close an account and get the Lamports back.
+Close an account and reclaim its lamports.
 
-[Anchor](./basics/close-account/anchor) [Quasar](./basics/close-account/quasar) [Pinocchio](./basics/close-account/pinocchio) [Native](./basics/close-account/native)
+[⚓ Anchor](./basics/close-account/anchor) [💫 Quasar](./basics/close-account/quasar) [🤥 Pinocchio](./basics/close-account/pinocchio) [🦀 Native](./basics/close-account/native)
 
-### Creating Accounts
+### Create Account
 
-Make new accounts on the blockchain.
+Create new accounts on the blockchain.
 
-[Anchor](./basics/create-account/anchor) [Quasar](./basics/create-account/quasar) [Pinocchio](./basics/create-account/pinocchio) [Native](./basics/create-account/native)
+[⚓ Anchor](./basics/create-account/anchor) [💫 Quasar](./basics/create-account/quasar) [🤥 Pinocchio](./basics/create-account/pinocchio) [🦀 Native](./basics/create-account/native)
 
-### Cross program invocations
+### Cross-Program Invocation
 
-Invoke an instruction handler from one onchain program in another onchain program.
+Call one program from another — the hand program invokes the lever program to toggle a switch.
 
-[Anchor](./basics/cross-program-invocation/anchor) [Quasar](./basics/cross-program-invocation/quasar) [Native](./basics/cross-program-invocation/native)
+[⚓ Anchor](./basics/cross-program-invocation/anchor) [💫 Quasar](./basics/cross-program-invocation/quasar) [🦀 Native](./basics/cross-program-invocation/native)
 
-### PDA rent-payer
+### PDA Rent Payer
 
-Use a PDA to pay the rent for the creation of a new account.
+Use a PDA to pay rent for creating a new account.
 
-[Anchor](./basics/pda-rent-payer/anchor) [Quasar](./basics/pda-rent-payer/quasar) [Pinocchio](./basics/pda-rent-payer/pinocchio) [Native](./basics/pda-rent-payer/native)
+[⚓ Anchor](./basics/pda-rent-payer/anchor) [💫 Quasar](./basics/pda-rent-payer/quasar) [🤥 Pinocchio](./basics/pda-rent-payer/pinocchio) [🦀 Native](./basics/pda-rent-payer/native)
 
-### Processing instructions
+### Processing Instructions
 
 Add parameters to an instruction handler and use them.
 
-[Anchor](./basics/processing-instructions/anchor) [Quasar](./basics/processing-instructions/quasar) [Pinocchio](./basics/processing-instructions/pinocchio) [Native](./basics/processing-instructions/native)
+[⚓ Anchor](./basics/processing-instructions/anchor) [💫 Quasar](./basics/processing-instructions/quasar) [🤥 Pinocchio](./basics/processing-instructions/pinocchio) [🦀 Native](./basics/processing-instructions/native)
 
-### Storing date in program derived addresses
+### Program Derived Addresses
 
-Store and retrieve state in Solana.
+Store and retrieve state using PDAs as deterministic account addresses.
 
-[Anchor](./basics/program-derived-addresses/anchor) [Quasar](./basics/program-derived-addresses/quasar) [Pinocchio](./basics/program-derived-addresses/pinocchio) [Native](./basics/program-derived-addresses/native)
+[⚓ Anchor](./basics/program-derived-addresses/anchor) [💫 Quasar](./basics/program-derived-addresses/quasar) [🤥 Pinocchio](./basics/program-derived-addresses/pinocchio) [🦀 Native](./basics/program-derived-addresses/native)
 
-### Handling accounts that expand in size
+### Realloc
 
-How to store state that changes size in Solana.
+Handle accounts that need to grow or shrink in size.
 
-[Anchor](./basics/realloc/anchor) [Quasar](./basics/realloc/quasar) [Pinocchio](./basics/realloc/pinocchio) [Native](./basics/realloc/native)
+[⚓ Anchor](./basics/realloc/anchor) [💫 Quasar](./basics/realloc/quasar) [🤥 Pinocchio](./basics/realloc/pinocchio) [🦀 Native](./basics/realloc/native)
 
-### Calculating account size to determine rent
+### Rent
 
-Determine the necessary minimum rent by calculating an account's size.
+Calculate an account's size to determine the minimum rent-exempt balance.
 
-[Anchor](./basics/rent/anchor) [Quasar](./basics/rent/quasar) [Pinocchio](./basics/rent/pinocchio) [Native](./basics/rent/native)
+[⚓ Anchor](./basics/rent/anchor) [💫 Quasar](./basics/rent/quasar) [🤥 Pinocchio](./basics/rent/pinocchio) [🦀 Native](./basics/rent/native)
 
-### Laying out larger programs
+### Repository Layout
 
-Layout larger Solana onchain programs.
+Structure a larger Solana program across multiple files and modules.
 
-[Anchor](./basics/repository-layout/anchor) [Quasar](./basics/repository-layout/quasar) [Native](./basics/repository-layout/native)
+[⚓ Anchor](./basics/repository-layout/anchor) [💫 Quasar](./basics/repository-layout/quasar) [🦀 Native](./basics/repository-layout/native)
 
-### Transferring SOL
+### Transfer SOL
 
 Send SOL between two accounts.
 
-[Anchor](./basics/transfer-sol/anchor) [Quasar](./basics/transfer-sol/quasar) [Pinocchio](./basics/transfer-sol/pinocchio) [Native](./basics/transfer-sol/native)
+[⚓ Anchor](./basics/transfer-sol/anchor) [💫 Quasar](./basics/transfer-sol/quasar) [🤥 Pinocchio](./basics/transfer-sol/pinocchio) [🦀 Native](./basics/transfer-sol/native)
+
 ## Tokens
-### Creating tokens
 
-Create a token on Solana with a token symbol and icon.
+### Create Token
 
-[Anchor](./tokens/create-token/anchor) [Quasar](./tokens/create-token/quasar) [Native](./tokens/create-token/native)
+Create a token mint with a symbol and icon.
 
-### Minting NFTS
+[⚓ Anchor](./tokens/create-token/anchor) [💫 Quasar](./tokens/create-token/quasar) [🦀 Native](./tokens/create-token/native)
 
-Mint an NFT from inside your own onchain program using the Token and Metaplex Token Metadata programs. Reminder: you don't need your own program just to mint an NFT, see the note at the top of this README.
+### Mint NFT
 
-[Anchor](./tokens/nft-minter/anchor) [Quasar](./tokens/nft-minter/quasar) [Native](./tokens/nft-minter/native)
+Mint an NFT from inside your own program using the Token and Metaplex Token Metadata programs.
 
-### NFT operations
+[⚓ Anchor](./tokens/nft-minter/anchor) [💫 Quasar](./tokens/nft-minter/quasar) [🦀 Native](./tokens/nft-minter/native)
+
+### NFT Operations
 
 Create an NFT collection, mint NFTs, and verify NFTs as part of a collection using Metaplex Token Metadata.
 
-[Anchor](./tokens/nft-operations/anchor) [Quasar](./tokens/nft-operations/quasar)
+[⚓ Anchor](./tokens/nft-operations/anchor) [💫 Quasar](./tokens/nft-operations/quasar)
 
-### Minting a token from inside a program
+### SPL Token Minter
 
-Mint a Token from inside your own onchain program using the Token program. Reminder: you don't need your own program just to mint an NFT, see the note at the top of this README.
+Mint tokens from inside your own program using the Token program.
 
-[Anchor](./tokens/spl-token-minter/anchor) [Quasar](./tokens/spl-token-minter/quasar) [Native](./tokens/spl-token-minter/native)
+[⚓ Anchor](./tokens/spl-token-minter/anchor) [💫 Quasar](./tokens/spl-token-minter/quasar) [🦀 Native](./tokens/spl-token-minter/native)
 
-### Transferring Tokens
+### Transfer Tokens
 
-Transfer tokens between accounts
+Transfer tokens between accounts.
 
-[Anchor](./tokens/transfer-tokens/anchor) [Quasar](./tokens/transfer-tokens/quasar) [Native](./tokens/transfer-tokens/native)
+[⚓ Anchor](./tokens/transfer-tokens/anchor) [💫 Quasar](./tokens/transfer-tokens/quasar) [🦀 Native](./tokens/transfer-tokens/native)
 
-### Allowing users to swap digital assets - Escrow
+### PDA Mint Authority
 
-Allow two users to swap digital assets with each other, each getting 100% of what the other has offered due to the power of decentralization!
+Mint tokens using a PDA as the mint authority, so your program controls token issuance.
 
-[Anchor](./tokens/escrow/anchor) [Quasar](./tokens/escrow/quasar) [Native](./tokens/escrow/native)
+[⚓ Anchor](./tokens/pda-mint-authority/anchor) [💫 Quasar](./tokens/pda-mint-authority/quasar) [🦀 Native](./tokens/pda-mint-authority/native)
 
-### Fundraising with SPL Tokens
-
-Create a fundraiser account specifying a target mint and amount, allowing contributors to deposit tokens until the goal is reached.
-
-[Anchor](./tokens/token-fundraiser/anchor) [Quasar](./tokens/token-fundraiser/quasar)
-
-### Minting a token from inside a program with a PDA as the mint authority
-
-Mint a Token from inside your own onchain program using the Token program. Reminder: you don't need your own program just to mint an NFT, see the note at the top of this README.
-
-[Anchor](./tokens/pda-mint-authority/anchor) [Quasar](./tokens/pda-mint-authority/quasar) [Native](./tokens/pda-mint-authority/native)
-
-### Creating an Automated Market Maker
-
-Create liquidity pools to allow trading of new digital assets and allows users that provide liquidity to be rewarded by creating an Automated Market Maker.
-
-[Anchor](./tokens/token-swap/anchor) [Quasar](./tokens/token-swap/quasar)
-
-### External delegate token master
+### External Delegate Token Master
 
 Control token transfers using an external secp256k1 delegate signature.
 
-[Anchor](./tokens/external-delegate-token-master/anchor) [Quasar](./tokens/external-delegate-token-master/quasar)
+[⚓ Anchor](./tokens/external-delegate-token-master/anchor) [💫 Quasar](./tokens/external-delegate-token-master/quasar)
+
 ## Token Extensions
-### Basics - create token mints, mint tokens, and transfer tokens with Token Extensions
+
+### Basics
 
 Create token mints, mint tokens, and transfer tokens using Token Extensions.
 
-[Anchor](./tokens/token-2022/basics/anchor) [Quasar](./tokens/token-2022/basics/quasar)
+[⚓ Anchor](./tokens/token-2022/basics/anchor) [💫 Quasar](./tokens/token-2022/basics/quasar)
 
-### Preventing CPIs with CPI guard
+### CPI Guard
 
-Enable CPI guard to prevents certain token action from occurring within CPI (Cross-Program Invocation).
+Prevent certain token actions from occurring within cross-program invocations.
 
-[Anchor](./tokens/token-2022/cpi-guard/anchor) [Quasar](./tokens/token-2022/cpi-guard/quasar)
+[⚓ Anchor](./tokens/token-2022/cpi-guard/anchor) [💫 Quasar](./tokens/token-2022/cpi-guard/quasar)
 
-### Using default account state
+### Default Account State
 
 Create new token accounts that are frozen by default.
 
-[Anchor](./tokens/token-2022/default-account-state/anchor) [Quasar](./tokens/token-2022/default-account-state/quasar) [Native](./tokens/token-2022/default-account-state/native)
+[⚓ Anchor](./tokens/token-2022/default-account-state/anchor) [💫 Quasar](./tokens/token-2022/default-account-state/quasar) [🦀 Native](./tokens/token-2022/default-account-state/native)
 
-### Grouping tokens
+### Group Pointer
 
-Create tokens that belong to larger groups of tokens using the Group Pointer extension.
+Create tokens that belong to larger groups using the Group Pointer extension.
 
-[Anchor](./tokens/token-2022/group/anchor) [Quasar](./tokens/token-2022/group/quasar)
+[⚓ Anchor](./tokens/token-2022/group/anchor) [💫 Quasar](./tokens/token-2022/group/quasar)
 
-### Creating token accounts whose owner cannot be changed
+### Immutable Owner
 
-Create tokens whose owning program cannot be changed.
+Create token accounts whose owning program cannot be changed.
 
-[Anchor](./tokens/token-2022/immutable-owner/anchor) [Quasar](./tokens/token-2022/immutable-owner/quasar)
+[⚓ Anchor](./tokens/token-2022/immutable-owner/anchor) [💫 Quasar](./tokens/token-2022/immutable-owner/quasar)
 
-### Interest bearing tokens
+### Interest Bearing Tokens
 
-Create tokens that show an 'interest' calculation.
+Create tokens that show an interest calculation, updating their displayed balance over time.
 
-[Anchor](./tokens/token-2022/interest-bearing/anchor) [Quasar](./tokens/token-2022/interest-bearing/quasar)
+[⚓ Anchor](./tokens/token-2022/interest-bearing/anchor) [💫 Quasar](./tokens/token-2022/interest-bearing/quasar)
 
-### Requiring transactions to include descriptive memos
+### Memo Transfer
 
-Create tokens where transfers must have a memo describing the transaction attached.
+Require all transfers to include a descriptive memo.
 
-[Anchor](./tokens/token-2022/memo-transfer/anchor) [Quasar](./tokens/token-2022/memo-transfer/quasar)
+[⚓ Anchor](./tokens/token-2022/memo-transfer/anchor) [💫 Quasar](./tokens/token-2022/memo-transfer/quasar)
 
-### Adding onchain metadata to the token mint
+### Onchain Metadata
 
-Create tokens that store their onchain metadata inside the token mint, without needing to use or pay for additional programs.
+Store metadata directly inside the token mint account, without needing additional programs.
 
-[Anchor](./tokens/token-2022/metadata/anchor) [Quasar](./tokens/token-2022/metadata/quasar)
+[⚓ Anchor](./tokens/token-2022/metadata/anchor)
 
-### Storing NFT metadata using the metadata pointer extension
+### NFT Metadata Pointer
 
-Create an NFT using the Token Extensions metadata pointer, storing onchain metadata (including custom fields) inside the mint account itself.
+Create an NFT using the metadata pointer extension, storing onchain metadata (including custom fields) inside the mint.
 
-[Anchor](./tokens/token-2022/nft-meta-data-pointer/anchor-example/anchor)
+[⚓ Anchor](./tokens/token-2022/nft-meta-data-pointer/anchor-example/anchor)
 
-### Allow a designated account to close a mint
+### Mint Close Authority
 
-Allow a designated account to close a Mint.
+Allow a designated account to close a token mint.
 
-[Anchor](./tokens/token-2022/mint-close-authority/anchor) [Quasar](./tokens/token-2022/mint-close-authority/quasar) [Native](./tokens/token-2022/mint-close-authority/native)
+[⚓ Anchor](./tokens/token-2022/mint-close-authority/anchor) [💫 Quasar](./tokens/token-2022/mint-close-authority/quasar) [🦀 Native](./tokens/token-2022/mint-close-authority/native)
 
-### Using multiple token extensions
+### Multiple Extensions
 
-Use multiple Token Extensions at once.
+Use multiple Token Extensions on a single mint at once.
 
-[Native](./tokens/token-2022/multiple-extensions/native)
+[🦀 Native](./tokens/token-2022/multiple-extensions/native)
 
-### Non-transferrable - create tokens that can't be transferred.
+### Non-Transferable Tokens
 
-Create tokens that cannot be transferred.
+Create tokens that cannot be transferred between accounts.
 
-[Anchor](./tokens/token-2022/non-transferable/anchor) [Quasar](./tokens/token-2022/non-transferable/quasar) [Native](./tokens/token-2022/non-transferable/native)
+[⚓ Anchor](./tokens/token-2022/non-transferable/anchor) [💫 Quasar](./tokens/token-2022/non-transferable/quasar) [🦀 Native](./tokens/token-2022/non-transferable/native)
 
-### Permanent Delegate - Create tokens permanently under the control of a particular account
+### Permanent Delegate
 
-Create tokens that remain under the control of an account, even when transferred elsewhere.
+Create tokens that remain under the control of a designated account, even when transferred elsewhere.
 
-[Anchor](./tokens/token-2022/permanent-delegate/anchor) [Quasar](./tokens/token-2022/permanent-delegate/quasar)
+[⚓ Anchor](./tokens/token-2022/permanent-delegate/anchor) [💫 Quasar](./tokens/token-2022/permanent-delegate/quasar)
 
-### Create tokens with a transfer-fee.
+### Transfer Fee
 
-Create tokens with an inbuilt transfer fee.
+Create tokens with a built-in transfer fee.
 
-[Anchor](./tokens/token-2022/transfer-fee/anchor) [Quasar](./tokens/token-2022/transfer-fee/quasar) [Native](./tokens/token-2022/transfer-fee/native)
+[⚓ Anchor](./tokens/token-2022/transfer-fee/anchor) [💫 Quasar](./tokens/token-2022/transfer-fee/quasar) [🦀 Native](./tokens/token-2022/transfer-fee/native)
 
-### Transfer hook - hello world
+### Transfer Hook — Hello World
 
-A minimal transfer hook program that executes custom logic on every token transfer.
+A minimal transfer hook that executes custom logic on every token transfer.
 
-[Anchor](./tokens/token-2022/transfer-hook/hello-world/anchor) [Quasar](./tokens/token-2022/transfer-hook/hello-world/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/hello-world/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/hello-world/quasar)
 
-### Transfer hook - counter
+### Transfer Hook — Counter
 
-Count how many times tokens have been transferred using a transfer hook.
+Count how many times tokens have been transferred.
 
-[Anchor](./tokens/token-2022/transfer-hook/counter/anchor) [Quasar](./tokens/token-2022/transfer-hook/counter/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/counter/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/counter/quasar)
 
-### Transfer hook - using account data as seed
+### Transfer Hook — Account Data as Seed
 
 Use token account owner data as seeds to derive extra accounts in a transfer hook.
 
-[Anchor](./tokens/token-2022/transfer-hook/account-data-as-seed/anchor) [Quasar](./tokens/token-2022/transfer-hook/account-data-as-seed/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/account-data-as-seed/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/account-data-as-seed/quasar)
 
-### Transfer hook - allow/block list
+### Transfer Hook — Allow/Block List
 
-Restrict or allow token transfers using an onchain allow/block list managed by a list authority.
+Restrict or allow token transfers using an onchain list managed by a list authority.
 
-[Anchor](./tokens/token-2022/transfer-hook/allow-block-list-token/anchor) [Quasar](./tokens/token-2022/transfer-hook/allow-block-list-token/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/allow-block-list-token/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/allow-block-list-token/quasar)
 
-### Transfer hook - transfer cost
+### Transfer Hook — Transfer Cost
 
-Charge an additional cost or fee on every token transfer using a transfer hook.
+Charge an additional fee on every token transfer.
 
-[Anchor](./tokens/token-2022/transfer-hook/transfer-cost/anchor) [Quasar](./tokens/token-2022/transfer-hook/transfer-cost/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/transfer-cost/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/transfer-cost/quasar)
 
-### Transfer hook - transfer switch
+### Transfer Hook — Transfer Switch
 
-Enable or disable token transfers with an onchain switch using a transfer hook.
+Enable or disable token transfers with an onchain switch.
 
-[Anchor](./tokens/token-2022/transfer-hook/transfer-switch/anchor) [Quasar](./tokens/token-2022/transfer-hook/transfer-switch/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/transfer-switch/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/transfer-switch/quasar)
 
-### Transfer hook - whitelist
+### Transfer Hook — Whitelist
 
-Restrict token transfers so only whitelisted accounts can receive tokens.
+Restrict transfers so only whitelisted accounts can receive tokens.
 
-[Anchor](./tokens/token-2022/transfer-hook/whitelist/anchor) [Quasar](./tokens/token-2022/transfer-hook/whitelist/quasar)
+[⚓ Anchor](./tokens/token-2022/transfer-hook/whitelist/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/whitelist/quasar)
+
 ## Compression
-### Cnft-burn
+
+### cNFT Burn
 
 Burn compressed NFTs.
 
-[Anchor](./compression/cnft-burn/anchor) [Quasar](./compression/cnft-burn/quasar)
+[⚓ Anchor](./compression/cnft-burn/anchor) [💫 Quasar](./compression/cnft-burn/quasar)
 
-### Cnft-vault
+### cNFT Vault
 
 Store Metaplex compressed NFTs inside a PDA.
 
-[Anchor](./compression/cnft-vault/anchor) [Quasar](./compression/cnft-vault/quasar)
+[⚓ Anchor](./compression/cnft-vault/anchor) [💫 Quasar](./compression/cnft-vault/quasar)
 
-### Cutils
+### Compression Utilities
 
 Work with Metaplex compressed NFTs.
 
-[Anchor](./compression/cutils/anchor) [Quasar](./compression/cutils/quasar)
+[⚓ Anchor](./compression/cutils/anchor) [💫 Quasar](./compression/cutils/quasar)
+
 ## Oracles
-### pyth
 
-Use a data source for offchain data (called an Oracle) to perform activities onchain.
+### Pyth Price Feeds
 
-[Anchor](./oracles/pyth/anchor) [Quasar](./oracles/pyth/quasar)
-## Tools
-### Shank and Solita
+Read offchain price data onchain using the Pyth oracle network.
 
-Use Shank and Solita to generate IDLs and TypeScript clients for native Solana programs, the same way Anchor does for Anchor programs.
-
-[Native](./tools/shank-and-solita/native)
+[⚓ Anchor](./oracles/pyth/anchor) [💫 Quasar](./oracles/pyth/quasar)
 
 ---
+
+**PRs welcome!** Follow the [contributing guidelines](./CONTRIBUTING.md) to keep things consistent.
