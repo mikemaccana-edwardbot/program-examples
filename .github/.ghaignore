@@ -28,8 +28,8 @@ compression/cnft-burn/anchor
 tokens/escrow/anchor
 
 # not live
-tokens/token-2022/group/anchor
-tokens/token-2022/group/quasar
+tokens/token-extensions/group/anchor
+tokens/token-extensions/group/quasar
 
 # CPI quasar project uses subdirectories (hand/ and lever/) instead of a root Quasar.toml
 basics/cross-program-invocation/quasar
@@ -48,14 +48,14 @@ oracles/pyth/quasar
 tokens/external-delegate-token-master/anchor
 
 # build failed - program outdated
-tokens/token-2022/metadata/anchor
+tokens/token-extensions/metadata/anchor
 
 # dependency issues
-tokens/token-2022/nft-meta-data-pointer/anchor-example/anchor
+tokens/token-extensions/nft-meta-data-pointer/anchor-example/anchor
 
-tokens/token-2022/mint-close-authority/native
-tokens/token-2022/transfer-fee/native
-tokens/token-2022/non-transferable/native
+tokens/token-extensions/mint-close-authority/native
+tokens/token-extensions/transfer-fee/native
+tokens/token-extensions/non-transferable/native
 
 # all steel projects
 

@@ -176,127 +176,127 @@ Control token transfers using an external secp256k1 delegate signature.
 
 Create token mints, mint tokens, and transfer tokens using Token Extensions.
 
-[⚓ Anchor](./tokens/token-2022/basics/anchor) [💫 Quasar](./tokens/token-2022/basics/quasar)
+[⚓ Anchor](./tokens/token-extensions/basics/anchor) [💫 Quasar](./tokens/token-extensions/basics/quasar)
 
 ### CPI Guard
 
 Prevent certain token actions from occurring within cross-program invocations.
 
-[⚓ Anchor](./tokens/token-2022/cpi-guard/anchor) [💫 Quasar](./tokens/token-2022/cpi-guard/quasar)
+[⚓ Anchor](./tokens/token-extensions/cpi-guard/anchor) [💫 Quasar](./tokens/token-extensions/cpi-guard/quasar)
 
 ### Default Account State
 
 Create new token accounts that are frozen by default.
 
-[⚓ Anchor](./tokens/token-2022/default-account-state/anchor) [💫 Quasar](./tokens/token-2022/default-account-state/quasar) [🦀 Native](./tokens/token-2022/default-account-state/native)
+[⚓ Anchor](./tokens/token-extensions/default-account-state/anchor) [💫 Quasar](./tokens/token-extensions/default-account-state/quasar) [🦀 Native](./tokens/token-extensions/default-account-state/native)
 
 ### Group Pointer
 
 Create tokens that belong to larger groups using the Group Pointer extension.
 
-[⚓ Anchor](./tokens/token-2022/group/anchor) [💫 Quasar](./tokens/token-2022/group/quasar)
+[⚓ Anchor](./tokens/token-extensions/group/anchor) [💫 Quasar](./tokens/token-extensions/group/quasar)
 
 ### Immutable Owner
 
 Create token accounts whose owning program cannot be changed.
 
-[⚓ Anchor](./tokens/token-2022/immutable-owner/anchor) [💫 Quasar](./tokens/token-2022/immutable-owner/quasar)
+[⚓ Anchor](./tokens/token-extensions/immutable-owner/anchor) [💫 Quasar](./tokens/token-extensions/immutable-owner/quasar)
 
 ### Interest Bearing Tokens
 
 Create tokens that show an interest calculation, updating their displayed balance over time.
 
-[⚓ Anchor](./tokens/token-2022/interest-bearing/anchor) [💫 Quasar](./tokens/token-2022/interest-bearing/quasar)
+[⚓ Anchor](./tokens/token-extensions/interest-bearing/anchor) [💫 Quasar](./tokens/token-extensions/interest-bearing/quasar)
 
 ### Memo Transfer
 
 Require all transfers to include a descriptive memo.
 
-[⚓ Anchor](./tokens/token-2022/memo-transfer/anchor) [💫 Quasar](./tokens/token-2022/memo-transfer/quasar)
+[⚓ Anchor](./tokens/token-extensions/memo-transfer/anchor) [💫 Quasar](./tokens/token-extensions/memo-transfer/quasar)
 
 ### Onchain Metadata
 
 Store metadata directly inside the token mint account, without needing additional programs.
 
-[⚓ Anchor](./tokens/token-2022/metadata/anchor)
+[⚓ Anchor](./tokens/token-extensions/metadata/anchor)
 
 ### NFT Metadata Pointer
 
 Create an NFT using the metadata pointer extension, storing onchain metadata (including custom fields) inside the mint.
 
-[⚓ Anchor](./tokens/token-2022/nft-meta-data-pointer/anchor-example/anchor)
+[⚓ Anchor](./tokens/token-extensions/nft-meta-data-pointer/anchor-example/anchor)
 
 ### Mint Close Authority
 
 Allow a designated account to close a token mint.
 
-[⚓ Anchor](./tokens/token-2022/mint-close-authority/anchor) [💫 Quasar](./tokens/token-2022/mint-close-authority/quasar) [🦀 Native](./tokens/token-2022/mint-close-authority/native)
+[⚓ Anchor](./tokens/token-extensions/mint-close-authority/anchor) [💫 Quasar](./tokens/token-extensions/mint-close-authority/quasar) [🦀 Native](./tokens/token-extensions/mint-close-authority/native)
 
 ### Multiple Extensions
 
 Use multiple Token Extensions on a single mint at once.
 
-[🦀 Native](./tokens/token-2022/multiple-extensions/native)
+[🦀 Native](./tokens/token-extensions/multiple-extensions/native)
 
 ### Non-Transferable Tokens
 
 Create tokens that cannot be transferred between accounts.
 
-[⚓ Anchor](./tokens/token-2022/non-transferable/anchor) [💫 Quasar](./tokens/token-2022/non-transferable/quasar) [🦀 Native](./tokens/token-2022/non-transferable/native)
+[⚓ Anchor](./tokens/token-extensions/non-transferable/anchor) [💫 Quasar](./tokens/token-extensions/non-transferable/quasar) [🦀 Native](./tokens/token-extensions/non-transferable/native)
 
 ### Permanent Delegate
 
 Create tokens that remain under the control of a designated account, even when transferred elsewhere.
 
-[⚓ Anchor](./tokens/token-2022/permanent-delegate/anchor) [💫 Quasar](./tokens/token-2022/permanent-delegate/quasar)
+[⚓ Anchor](./tokens/token-extensions/permanent-delegate/anchor) [💫 Quasar](./tokens/token-extensions/permanent-delegate/quasar)
 
 ### Transfer Fee
 
 Create tokens with a built-in transfer fee.
 
-[⚓ Anchor](./tokens/token-2022/transfer-fee/anchor) [💫 Quasar](./tokens/token-2022/transfer-fee/quasar) [🦀 Native](./tokens/token-2022/transfer-fee/native)
+[⚓ Anchor](./tokens/token-extensions/transfer-fee/anchor) [💫 Quasar](./tokens/token-extensions/transfer-fee/quasar) [🦀 Native](./tokens/token-extensions/transfer-fee/native)
 
 ### Transfer Hook — Hello World
 
 A minimal transfer hook that executes custom logic on every token transfer.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/hello-world/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/hello-world/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/hello-world/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/hello-world/quasar)
 
 ### Transfer Hook — Counter
 
 Count how many times tokens have been transferred.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/counter/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/counter/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/counter/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/counter/quasar)
 
 ### Transfer Hook — Account Data as Seed
 
 Use token account owner data as seeds to derive extra accounts in a transfer hook.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/account-data-as-seed/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/account-data-as-seed/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/account-data-as-seed/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/account-data-as-seed/quasar)
 
 ### Transfer Hook — Allow/Block List
 
 Restrict or allow token transfers using an onchain list managed by a list authority.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/allow-block-list-token/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/allow-block-list-token/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/allow-block-list-token/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/allow-block-list-token/quasar)
 
 ### Transfer Hook — Transfer Cost
 
 Charge an additional fee on every token transfer.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/transfer-cost/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/transfer-cost/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/transfer-cost/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/transfer-cost/quasar)
 
 ### Transfer Hook — Transfer Switch
 
 Enable or disable token transfers with an onchain switch.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/transfer-switch/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/transfer-switch/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/transfer-switch/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/transfer-switch/quasar)
 
 ### Transfer Hook — Whitelist
 
 Restrict transfers so only whitelisted accounts can receive tokens.
 
-[⚓ Anchor](./tokens/token-2022/transfer-hook/whitelist/anchor) [💫 Quasar](./tokens/token-2022/transfer-hook/whitelist/quasar)
+[⚓ Anchor](./tokens/token-extensions/transfer-hook/whitelist/anchor) [💫 Quasar](./tokens/token-extensions/transfer-hook/whitelist/quasar)
 
 ## Compression
 

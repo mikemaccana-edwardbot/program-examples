@@ -56,7 +56,7 @@ fn test_transfer_hook_hello_world() {
     let initialize_ix = Instruction::new_with_bytes(
         program_id,
         &transfer_hook::instruction::Initialize {
-            _decimals: decimals,
+            decimals,
         }
         .data(),
         transfer_hook::accounts::Initialize {
@@ -136,7 +136,7 @@ fn test_transfer_hook_hello_world() {
     // Step 5: Try calling transfer_hook directly (should fail — not transferring)
     let direct_hook_ix = Instruction::new_with_bytes(
         program_id,
-        &transfer_hook::instruction::TransferHook { _amount: 1 }.data(),
+        &transfer_hook::instruction::TransferHook { amount: 1 }.data(),
         transfer_hook::accounts::TransferHook {
             source_token: source_ata,
             mint: mint_keypair.pubkey(),

@@ -7,6 +7,11 @@ name = "account-data-anchor-program"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "borsh 1.6.1",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -368,6 +373,11 @@ name = "anchor-realloc"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "borsh 1.6.1",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -932,6 +942,10 @@ name = "carnival"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -972,6 +986,11 @@ name = "checking-accounts-anchor-program-example"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "borsh 1.6.1",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -1054,6 +1073,10 @@ name = "close-account-program"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -1159,6 +1182,11 @@ name = "counter_anchor"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "borsh 1.6.1",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -1206,6 +1234,10 @@ name = "create-system-account"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -1710,6 +1742,10 @@ name = "hand"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -1768,6 +1804,9 @@ name = "hello-solana-anchor"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -1917,6 +1956,10 @@ name = "lever"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -2281,6 +2324,10 @@ name = "pda-rent-payer"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -2454,6 +2501,10 @@ name = "processing-instructions"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -2540,6 +2591,11 @@ name = "program-derived-addresses-program"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "borsh 1.6.1",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -2752,6 +2808,11 @@ name = "rent-example"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "borsh 1.6.1",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]
@@ -3984,6 +4045,25 @@ dependencies = [
  "solana-seed-phrase",
  "solana-signature",
  "solana-signer",
+]
+
+[[package]]
+name = "solana-kite"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92c6774af93647a15b51e266bc76f558fba11fbfbe30131b50664e665a8fea55"
+dependencies = [
+ "litesvm",
+ "solana-account 3.4.0",
+ "solana-instruction 3.3.0",
+ "solana-keypair",
+ "solana-message 3.1.0",
+ "solana-program 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-signer",
+ "solana-transaction 3.1.0",
+ "spl-associated-token-account",
+ "spl-token",
 ]
 
 [[package]]
@@ -5664,11 +5744,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "spl-associated-token-account"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0242277e290c023de8826f504abcf9206b3cd4e18d9ace4ec59a698b2828e88b"
+dependencies = [
+ "borsh 1.6.1",
+ "num-derive",
+ "num-traits",
+ "solana-account-info 3.1.1",
+ "solana-cpi 3.1.0",
+ "solana-instruction 3.3.0",
+ "solana-msg 3.1.0",
+ "solana-program-entrypoint 3.1.1",
+ "solana-program-error 3.0.1",
+ "solana-pubkey 3.0.0",
+ "solana-rent 3.1.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-system-interface 2.0.0",
+ "solana-sysvar 3.1.1",
+ "spl-associated-token-account-interface",
+ "spl-token-2022-interface",
+ "spl-token-interface",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "spl-associated-token-account-interface"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6433917b60441d68d99a17e121d9db0ea15a9a69c0e5afa34649cf5ba12612f"
 dependencies = [
+ "borsh 1.6.1",
  "solana-instruction 3.3.0",
  "solana-pubkey 3.0.0",
 ]
@@ -5725,6 +5832,34 @@ dependencies = [
  "solana-program-option 3.1.0",
  "solana-pubkey 3.0.0",
  "solana-zk-sdk",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "spl-token"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "878b0183d51fcd8a53e1604f4c13321894cf53227e6773c529b0d03d499a8dfd"
+dependencies = [
+ "arrayref",
+ "bytemuck",
+ "num-derive",
+ "num-traits",
+ "num_enum",
+ "solana-account-info 3.1.1",
+ "solana-cpi 3.1.0",
+ "solana-instruction 3.3.0",
+ "solana-msg 3.1.0",
+ "solana-program-entrypoint 3.1.1",
+ "solana-program-error 3.0.1",
+ "solana-program-memory 3.1.0",
+ "solana-program-option 3.1.0",
+ "solana-program-pack 3.1.0",
+ "solana-pubkey 3.0.0",
+ "solana-rent 3.1.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-sysvar 3.1.1",
+ "spl-token-interface",
  "thiserror 2.0.18",
 ]
 
@@ -6093,6 +6228,10 @@ name = "transfer-sol"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "litesvm",
+ "solana-keypair",
+ "solana-kite",
+ "solana-signer",
 ]
 
 [[package]]

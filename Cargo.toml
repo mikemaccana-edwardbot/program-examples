@@ -45,11 +45,11 @@ members = [
     "basics/transfer-sol/anchor/programs/*",
 
     # tokens
-    "tokens/token-2022/mint-close-authority/native/program",
-    "tokens/token-2022/non-transferable/native/program",
-    "tokens/token-2022/default-account-state/native/program",
-    "tokens/token-2022/transfer-fee/native/program",
-    "tokens/token-2022/multiple-extensions/native/program",
+    "tokens/token-extensions/mint-close-authority/native/program",
+    "tokens/token-extensions/non-transferable/native/program",
+    "tokens/token-extensions/default-account-state/native/program",
+    "tokens/token-extensions/transfer-fee/native/program",
+    "tokens/token-extensions/multiple-extensions/native/program",
 ]
 resolver = "2"
 

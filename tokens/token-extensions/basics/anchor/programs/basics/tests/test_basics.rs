@@ -51,7 +51,7 @@ fn test_create_token_and_mint_and_transfer() {
     let create_token_ix = Instruction::new_with_bytes(
         program_id,
         &anchor::instruction::CreateToken {
-            _token_name: token_name.clone(),
+            token_name: token_name.clone(),
         }
         .data(),
         anchor::accounts::CreateToken {
