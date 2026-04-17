@@ -38,7 +38,7 @@ pub struct VerifyCollectionMint<'info> {
     pub token_metadata_program: Program<'info, Metadata>,
 }
 
-pub fn handle_verify_collection(accounts: &mut VerifyCollectionMint, bumps: &VerifyCollectionMintBumps) -> Result<()> {
+pub fn handler(accounts: &mut VerifyCollectionMint, bumps: &VerifyCollectionMintBumps) -> Result<()> {
         let metadata = &accounts.metadata.to_account_info();
         let authority = &accounts.mint_authority.to_account_info();
         let collection_mint = &accounts.collection_mint.to_account_info();

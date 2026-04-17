@@ -1,5 +1,5 @@
-pub mod actions;
-pub use actions::*;
+pub mod instructions;
+pub use instructions::*;
 
 pub mod bubblegum_types;
 

@@ -2,23 +2,23 @@ use anchor_lang::prelude::*;
 
 declare_id!("3EMcczaGi9ivdLxvvFwRbGYeEUEHpGwabXegARw4jLxa");
 
-pub mod contexts;
+pub mod instructions;
 
-pub use contexts::*;
+pub use instructions::*;
 
 #[program]
 pub mod mint_nft {
 
     use super::*;
     pub fn create_collection(mut context: Context<CreateCollection>) -> Result<()> {
-        handle_create_collection(&mut context.accounts, &context.bumps)
+        instructions::create_collection::handler(&mut context.accounts, &context.bumps)
     }
 
     pub fn mint_nft(mut context: Context<MintNFT>) -> Result<()> {
-        handle_mint_nft(&mut context.accounts, &context.bumps)
+        instructions::mint_nft::handler(&mut context.accounts, &context.bumps)
     }
 
     pub fn verify_collection(mut context: Context<VerifyCollectionMint>) -> Result<()> {
-        handle_verify_collection(&mut context.accounts, &context.bumps)
+        instructions::verify_collection::handler(&mut context.accounts, &context.bumps)
     }
 }

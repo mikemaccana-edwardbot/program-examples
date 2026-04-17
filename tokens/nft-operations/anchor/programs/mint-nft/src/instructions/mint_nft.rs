@@ -65,7 +65,7 @@ pub struct MintNFT<'info> {
     pub token_metadata_program: Program<'info, Metadata>,
 }
 
-pub fn handle_mint_nft(accounts: &mut MintNFT, bumps: &MintNFTBumps) -> Result<()> {
+pub fn handler(accounts: &mut MintNFT, bumps: &MintNFTBumps) -> Result<()> {
 
         let metadata = &accounts.metadata.to_account_info();
         let master_edition = &accounts.master_edition.to_account_info();

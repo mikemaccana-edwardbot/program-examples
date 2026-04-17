@@ -63,7 +63,7 @@ pub struct CreateCollection<'info> {
     token_metadata_program: Program<'info, Metadata>,
 }
 
-pub fn handle_create_collection(accounts: &mut CreateCollection, bumps: &CreateCollectionBumps) -> Result<()> {
+pub fn handler(accounts: &mut CreateCollection, bumps: &CreateCollectionBumps) -> Result<()> {
 
         let metadata = &accounts.metadata.to_account_info();
         let master_edition = &accounts.master_edition.to_account_info();
