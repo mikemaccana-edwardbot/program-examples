@@ -1,0 +1,68 @@
+use anchor_lang::prelude::*;
+
+/// Lifecycle of a `Lease`. Transitions:
+///   Listed      --take_lease-->     Active
+///   Active      --return_lease-->   Closed
+///   Active      --liquidate-->      Liquidated
+///   Listed      --close_expired-->  Closed  (lessor cancels unrented lease)
+///   Active      --close_expired-->  Closed  (after end_ts, defaulted lessee)
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
+pub enum LeaseStatus {
+    Listed,
+    Active,
+    Liquidated,
+    Closed,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Lease {
+    /// Caller-supplied id so one lessor can run many leases in parallel. The
+    /// PDA is seeded by (LEASE_SEED, lessor, lease_id).
+    pub lease_id: u64,
+    /// Account that listed the lease and receives rent. Always set.
+    pub lessor: Pubkey,
+    /// Account that took the lease. `Pubkey::default()` while `Listed`.
+    pub lessee: Pubkey,
+
+    /// Mint of the tokens being leased out.
+    pub leased_mint: Pubkey,
+    /// Amount of leased tokens locked at creation. Used for repayment checks.
+    pub leased_amount: u64,
+
+    /// Mint of the collateral posted by the lessee.
+    pub collateral_mint: Pubkey,
+    /// Collateral the lessee posted (increases on top-up). Decreases as rent
+    /// is streamed out of the collateral vault.
+    pub collateral_amount: u64,
+    /// Collateral the lessee must deposit up-front when taking the lease.
+    pub required_collateral_amount: u64,
+
+    /// Rent charged per second, denominated in collateral tokens and paid
+    /// from the collateral vault to the lessor on each `pay_rent`.
+    pub rent_per_second: u64,
+    /// Length of the lease, in seconds. Set at creation, used to compute
+    /// `end_ts` when the lease activates.
+    pub duration_seconds: i64,
+    /// Unix timestamp when the lease becomes active (set on `take_lease`).
+    pub start_ts: i64,
+    /// Unix timestamp after which the lease expires. 0 while `Listed`.
+    pub end_ts: i64,
+    /// Last time rent was settled. Rent accrues from here to `now.min(end_ts)`.
+    pub last_rent_paid_ts: i64,
+
+    /// Required collateral value as a percentage of the leased value,
+    /// expressed in basis points. 12_000 bps = 120%.
+    pub maintenance_margin_bps: u16,
+    /// Share of the seized collateral paid to the keeper that liquidates the
+    /// lease, expressed in basis points of `collateral_amount`.
+    pub liquidation_bounty_bps: u16,
+
+    /// Current lifecycle state.
+    pub status: LeaseStatus,
+
+    /// Bump seeds — stored so CPIs can sign without re-deriving.
+    pub bump: u8,
+    pub leased_vault_bump: u8,
+    pub collateral_vault_bump: u8,
+}

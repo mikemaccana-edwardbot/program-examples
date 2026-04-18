@@ -1,0 +1,135 @@
+use anchor_lang::prelude::*;
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{Mint, TokenAccount, TokenInterface},
+};
+
+use crate::{
+    constants::{COLLATERAL_VAULT_SEED, LEASE_SEED},
+    errors::AssetLeasingError,
+    instructions::shared::transfer_tokens_from_vault,
+    state::{Lease, LeaseStatus},
+};
+
+#[derive(Accounts)]
+pub struct PayRent<'info> {
+    /// Anyone may settle rent — the lessee has every incentive to keep the
+    /// lease current, but a keeper bot could also push a payment before a
+    /// liquidation check so healthy leases stay healthy.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: Referenced only for PDA derivation + has_one check on `lease`.
+    pub lessor: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [LEASE_SEED, lessor.key().as_ref(), &lease.lease_id.to_le_bytes()],
+        bump = lease.bump,
+        has_one = lessor,
+        has_one = collateral_mint,
+        constraint = lease.status == LeaseStatus::Active @ AssetLeasingError::InvalidLeaseStatus,
+    )]
+    pub lease: Account<'info, Lease>,
+
+    pub collateral_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [COLLATERAL_VAULT_SEED, lease.key().as_ref()],
+        bump = lease.collateral_vault_bump,
+        token::mint = collateral_mint,
+        token::authority = collateral_vault,
+        token::token_program = token_program,
+    )]
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// Lessor's collateral-mint ATA, created on demand so the lessor does not
+    /// need to pre-fund it with rent.
+    #[account(
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = collateral_mint,
+        associated_token::authority = lessor,
+        associated_token::token_program = token_program,
+    )]
+    pub lessor_collateral_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_pay_rent(context: Context<PayRent>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+
+    let rent_amount = compute_rent_due(&context.accounts.lease, now)?;
+
+    // No time has passed (or already capped at end_ts). Nothing to do.
+    if rent_amount == 0 {
+        update_last_paid_ts(&mut context.accounts.lease, now);
+        return Ok(());
+    }
+
+    // Cap rent at whatever collateral actually sits in the vault. If the
+    // lessee under-collateralised we cannot magically create funds; the
+    // remainder is their debt and can trigger liquidation.
+    let payable = rent_amount.min(context.accounts.collateral_amount_available());
+
+    if payable > 0 {
+        let lease_key = context.accounts.lease.key();
+        let collateral_vault_bump = context.accounts.lease.collateral_vault_bump;
+        let collateral_vault_seeds: &[&[u8]] = &[
+            COLLATERAL_VAULT_SEED,
+            lease_key.as_ref(),
+            core::slice::from_ref(&collateral_vault_bump),
+        ];
+        let signer_seeds = [collateral_vault_seeds];
+
+        transfer_tokens_from_vault(
+            &context.accounts.collateral_vault,
+            &context.accounts.lessor_collateral_account,
+            payable,
+            &context.accounts.collateral_mint,
+            &context.accounts.collateral_vault.to_account_info(),
+            &context.accounts.token_program,
+            &signer_seeds,
+        )?;
+
+        context.accounts.lease.collateral_amount = context
+            .accounts
+            .lease
+            .collateral_amount
+            .checked_sub(payable)
+            .ok_or(AssetLeasingError::MathOverflow)?;
+    }
+
+    update_last_paid_ts(&mut context.accounts.lease, now);
+    Ok(())
+}
+
+/// Rent accrues linearly: `(min(now, end_ts) - last_rent_paid_ts) * rate`.
+/// Extracted so it can be re-used by `return_lease` and `liquidate` for a
+/// final settlement before closing the lease.
+pub fn compute_rent_due(lease: &Lease, now: i64) -> Result<u64> {
+    let cutoff = now.min(lease.end_ts);
+    if cutoff <= lease.last_rent_paid_ts {
+        return Ok(0);
+    }
+    let elapsed = (cutoff - lease.last_rent_paid_ts) as u64;
+    elapsed
+        .checked_mul(lease.rent_per_second)
+        .ok_or(AssetLeasingError::MathOverflow.into())
+}
+
+/// Advance `last_rent_paid_ts` but never past the lease end — after end_ts
+/// the lease is settled and extra rent does not accrue.
+pub fn update_last_paid_ts(lease: &mut Lease, now: i64) {
+    lease.last_rent_paid_ts = now.min(lease.end_ts);
+}
+
+impl<'info> PayRent<'info> {
+    fn collateral_amount_available(&self) -> u64 {
+        self.lease.collateral_amount
+    }
+}
