@@ -1,332 +1,332 @@
-## Token swap example amm in anchor rust
+# Token Swap (Constant-Product AMM)
 
-**Automated Market Makers (AMM)** - Your Gateway to Effortless Trading!
-Welcome to the world of Automated Market Makers (AMM), where seamless trading is made possible with the power of automation. The primary goal of AMMs is to act as automatic buyers and sellers, readily available whenever users wish to trade their assets.
+A Uniswap-V2-style Automated Market Maker in a single Anchor
+program. Supports creating a fee-collecting AMM config, opening a
+pool for any token-A / token-B pair, depositing and withdrawing
+liquidity in exchange for LP tokens, and swapping tokens with the
+constant-product invariant `x * y = k` (minus trading fees).
 
-**Advantages of AMMs:**
+Enough to teach the mechanics. Not production-ready — there are a
+couple of known footguns called out in the Safety section.
 
-- Always Available Trading: Thanks to the algorithmic trading, AMMs are operational round-the-clock, ensuring you never miss a trading opportunity.
+## Table of contents
 
-- Low Operational Costs: Embrace cheaper trades as AMMs eliminate the need for a market-making firm. Say goodbye to hefty fees! (In practice, MEV bots handle this role.)
+1. [What does this program do?](#1-what-does-this-program-do)
+2. [Glossary](#2-glossary)
+3. [Accounts and PDAs](#3-accounts-and-pdas)
+4. [Instruction lifecycle walkthrough](#4-instruction-lifecycle-walkthrough)
+5. [The constant-product invariant](#5-the-constant-product-invariant)
+6. [Worked example](#6-worked-example)
+7. [Safety and edge cases](#7-safety-and-edge-cases)
+8. [Running the tests](#8-running-the-tests)
+9. [Extending the program](#9-extending-the-program)
 
-Selecting the right algorithm for the AMM becomes the essential task. One fascinating development in blockchain AMMs is the Constant Function AMM (CFAMM), which permits trades that preserve a predefined condition on a constant function of the AMM's reserves, known as the Invariant. This enforcement compels the reserves to evolve along a remarkable Bonding Curve.
+## 1. What does this program do?
 
-Meet the Constant Product AMM (CPAMM): Among the simplest CFAMMs and made popular by Uniswap V2, the CPAMM ensures the product of both reserves (xy) remains constant (K) for a given liquidity quantity. Simply put, if x denotes the reserve of token A and y denotes the reserve of token B, then xy = K, with K depending on the liquidity.
+Five instructions:
 
-*Discover Diverse Bonding Curves:*
+| instruction | who calls | effect |
+|---|---|---|
+| `create_amm(id, fee)` | anyone | Creates an `Amm` PDA seeded by `id`, stores `admin`, `fee` (bps). One `Amm` can host many pools. |
+| `create_pool()` | anyone | Creates a `Pool` PDA seeded by `(amm, mint_a, mint_b)`, a pool-authority PDA, an LP mint, and two pool-owned ATAs for A and B. |
+| `deposit_liquidity(amount_a, amount_b)` | LP (liquidity provider) | Moves A and B into the pool, mints LP tokens to the LP proportional to `sqrt(a * b)` (with a minimum-liquidity lock on the first deposit). |
+| `withdraw_liquidity(amount)` | LP | Burns `amount` LP tokens and sends proportional A and B back to the LP. |
+| `swap_exact_tokens_for_tokens(swap_a, input, min_output)` | trader | Trader sends `input` of one token, receives the computed output of the other, with slippage protection via `min_output`. A fee `fee` bps is deducted from `input` before the AMM maths. |
 
-- Constant Sum AMM (CSAMM): The pool's invariant, x + y = K, maintains a constant price, but reserves for each asset can be emptied.
+## 2. Glossary
 
-- Curve's Stableswap: A clever mix of CSAMM and CPAMM, the Stableswap brings unique properties to the AMM, depending on the token balance.
+**AMM (Automated Market Maker)**
+: A smart contract that acts as a counterparty for token swaps. It
+maintains token reserves and quotes prices from a formula
+(bonding curve) rather than from an order book. Traders always have
+a market, even when no human is on the other side.
 
-- Uniswap V3 Concentrated Liquidity AMM (CLAMM): Utilizing CPAMM, this model splits the curve into independent buckets, allowing liquidity provision to specific price buckets for efficient trading.
+**Constant-product formula (CPMM)**
+: The simplest bonding curve: `x * y = k`, where `x` and `y` are
+the pool's reserves of token A and token B, and `k` is a constant
+set by the current liquidity. A trade must leave `k` unchanged (or
+larger, with fees). Used by Uniswap V2.
 
-- Trader Joe CLAMM: Similar to UniV3 CLAMM, it divides the price range into buckets, where each bucket operates as a CSAMM instead of a CPAMM.
+**Basis points (bps)**
+: 1 bp = 0.01%. A `fee = 30` means 0.30% fee per swap. `fee = 10000`
+would be 100%, which this program rejects in `create_amm`.
 
-*The Undeniable Perks of CPAMMs:*
+**LP (Liquidity Provider)**
+: Someone who deposits both tokens in the pool's current ratio,
+receives LP tokens representing a share of the pool. Fees earned by
+the pool accrue to LPs proportionally to their share.
 
-- Easier to Understand and Use: Unlike complex liquidity buckets, CPAMMs offer a single, user-friendly pool for straightforward trading.
+**LP token (mint_liquidity)**
+: A fresh SPL mint created per pool. `mint_authority` is the
+pool-authority PDA. LP token supply grows when liquidity is added,
+shrinks on withdrawal. Current share of the pool = your LP balance
+/ total LP supply.
 
-- Memory Efficiency: With just one pool to maintain instead of multiple buckets, CPAMMs are incredibly memory-efficient, leading to lower memory usage and reduced costs.
+**Pool authority**
+: A PDA seeded by `(amm, mint_a, mint_b, "authority")`. Owns the
+two pool ATAs and is the mint authority for the LP mint. Signed by
+the program using `invoke_signed` whenever tokens flow out of the
+pool or LP tokens are minted/burned.
 
-For these reasons, we focus on implementing the CPAMM.
+**Minimum liquidity**
+: On the very first deposit, `MINIMUM_LIQUIDITY = 100` LP units are
+"locked" (never minted to the depositor). Borrowed from Uniswap V2.
+Prevents a first-depositor dust-attack where a tiny pool can be
+manipulated by rounding.
 
-## Program Implementation
+**Invariant `k`**
+: Post-swap, the product of the reserves must be `≥` the pre-swap
+product (equal if fee is 0). The program recomputes `k` after every
+swap and errors if it shrank.
 
-### Design
+**Slippage**
+: The gap between the price you expected and the price you got. As
+your input grows relative to reserves, `x * y = k` punishes you
+more. `min_output_amount` lets you abort if slippage exceeds your
+tolerance.
 
-Let's go over the essential requirements for our smart contract design:
+## 3. Accounts and PDAs
 
-- Fee Distribution: Every pool must have a fee to reward Liquidity Providers (LPs). This fee is charged on trades and paid directly in the traded token. To maintain consistency across all pools, the fees will be shared.
+### `Amm` state
 
-- Single Pool per Asset Pair: Each asset pair will have precisely one pool. This approach avoids liquidity fragmentation and simplifies the process for developers to locate the appropriate pool.
-
-- LPs Deposit Accounting: We need to keep track of LPs deposits in the smart contract.
-
-To achieve an efficient and organized design, we can implement the following strategies:
-
-- Shared Parameters: As pools can share certain parameters like the trading fee, we can create a single account to store these shared parameters for all pools. Additionally, each pool will have its separate account. This approach saves storage space, except when the configuration is smaller than 32 bytes due to the need to store the public key. In our case, we'll include an admin for the AMM to control fees, which exceeds the limit.
-
-- Unique Pool Identification: To ensure each pool remains unique, we'll utilize seeds to generate a Program Derived Account (PDA). This helps avoid any ambiguity or confusion.
-
-- SPL Token for Liquidity Accounting: We'll utilize the SPL token standard for liquidity accounting. This choice ensures easy composability and simplifies the handling of liquidity in the contract.
-
-By implementing these strategies, we are creating a solana program that efficiently manages liquidity pools, rewards LPs, and maintains a seamless trading experience across various asset pairs.
-
-## Principals
-
-Here are some essential principles to consider when building onchain programs in Solana:
-
-- Store Keys in the Account: It's beneficial to store keys in the account when creating Program Derived Accounts (PDAs) using seeds. While this may increase account rent slightly, it offers significant advantages. By having all the necessary keys in the account, it becomes effortless to locate the account (since you can recreate its public key). Additionally, this approach works seamlessly with Anchor's has_one clause, streamlining the process.
-
-- Simplicity in Seeds: When creating PDA seeds, prioritize simplicity. Using a straightforward logic for seeds makes it easier to remember and clarifies the relationship between accounts. A logical approach is to first include the seeds of the parent account and then use the current object's identifiers, preferably in alphabetical order. For example, in an AMM account storing configuration (with no parent), adding an identifier attribute, usually a pubkey, becomes necessary since the admin can change. For pools, which have the AMM as a parent and are uniquely defined by the tokens they facilitate trades for, it's advisable to use the AMM's pubkey as the seed, followed by token A's pubkey and then token B's.
-
-- Minimize Instruction's Scope: Keeping each instruction's scope as small as possible is crucial for several reasons. It helps reduce transaction size by limiting the number of accounts touched simultaneously. Moreover, it enhances composability, readability, and security. However, a trade-off to consider is that it may lead to an increase in Lines Of Code (LOC).
-
-- By following these principles, you can build onchain programs in Solana that are efficient, well-organized, and conducive to seamless interactions, ensuring a robust foundation for your blockchain projects.
-
-## Code Examples
-
-```file structure
-programs/token-swap/src/
-├── constants.rs
-├── errors.rs
-├── instructions
-│   ├── create_amm.rs
-│   ├── create_pool.rs
-│   ├── deposit_liquidity.rs
-│   ├── mod.rs
-│   ├── swap_exact_tokens_for_tokens.rs
-│   └── withdraw_liquidity.rs
-├── lib.rs
-└── state.rs
+```
+Amm { id: Pubkey, admin: Pubkey, fee: u16, bump: u8 }
 ```
 
-
-1. **Entrypoint**
-
-This code is entrypoint for a swap example using the **`anchor_lang`** library. The **`anchor_lang`** library provides tools for creating Solana programs using the Anchor framework. The code defines several functions:
-
-(https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/lib.rs#L1-L8)
-
-The above section contains the necessary imports and module declarations for the program. It imports modules from the anchor_lang library and declares local modules for the crate. The pub use instructions::*; re-exports all items from the instructions module so that they can be accessed from outside this module.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/lib.rs#L10-L11
-
-This macro declares the program ID and associates it with the given string. This ID should match the deployed Solana program's ID to ensure the correct program is invoked when interacting with the smart contract.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/lib.rs#L13-L45
-
-This section defines the program module using the **`#[program]`** attribute. Each function in this module represents an entry point to the smart contract. Each entry point function takes a **`Context`** parameter, which provides essential information for executing the function, such as the accounts involved and the transaction context.
-
-The entry point functions call their respective functions from the **`instructions`** module, passing the required arguments.
-
-Overall, this code defines a Rust module for a Solana program using the Anchor framework. The program supports functions related to creating an Automated Market Maker (AMM) and interacting with it, such as creating a pool, depositing liquidity, withdrawing liquidity, and swapping tokens using an AMM mechanism.
-
-2. **Account Definitions**
-
-Let's embark on our exploration by charting the course for our accounts. Each account will be thoughtfully defined, beginning with their keys arranged in the precise order they will appear in the seeds. Following the keys, we'll list the attributes that are utilized for each account. As we journey through this process, we'll unravel the intricate web of connections and forge a path towards a cohesive and well-structured design. Let the exploration begin!
-
-The above code declares an account structure called **`Amm`**. The **`#[account]`** attribute indicates that this structure will be used as an account on the Solana blockchain. The **`#[derive(Default)]`** attribute automatically generates a default implementation of the struct with all fields set to their default values.
-
-The **`Amm`** struct has three fields:
-
-1. **`id`**: The primary key of the AMM, represented as a **`Pubkey`**.
-2. **`admin`**: The account that has admin authority over the AMM, represented as a **`Pubkey`**.
-3. **`fee`**: The LP fee taken on each trade, represented as a **`u16`** (unsigned 16-bit integer) in basis points.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/state.rs#L1-L14
-
-
-The above code declares an account structure called Amm. The #[account] attribute indicates that this structure will be used as an account on the Solana blockchain. The #[derive(Default)] attribute automatically generates a default implementation of the struct with all fields set to their default values.
-
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/state.rs#L16-L18
-
-This code implements a constant LEN for the Amm struct, which represents the size of the Amm account in bytes. The size is calculated by adding the sizes of the individual fields (id, admin, and fee). For example, Pubkey has a fixed size of 32 bytes, and u16 has a size of 2 bytes.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/state.rs#L20-L31
-
-The code declares another account structure called **`Pool`**. As before, the **`#[account]`** attribute indicates that this struct will be used as an account on the Solana blockchain, and the **`#[derive(Default)]`** attribute generates a default implementation with all fields set to their default values.
-
-The **`Pool`** struct has three fields:
-
-1. **`amm`**: The primary key of the AMM (Automated Market Maker) that this pool belongs to, represented as a **`Pubkey`**.
-2. **`mint_a`**: The mint of token A associated with this pool, represented as a **`Pubkey`**.
-3. **`mint_b`**: The mint of token B associated with this pool, represented as a **`Pubkey`**.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/state.rs#L33-L35
-
-This code implements a constant LEN for the Pool struct, which represents the size of the Pool account in bytes. Similar to the Amm struct, the size is calculated by adding the sizes of the individual fields (amm, mint_a, and mint_b). Each Pubkey has a size of 32 bytes, and the total size is 8 bytes (for padding) + 32 bytes (amm) + 32 bytes (mint_a) + 32 bytes (mint_b) = 104 bytes.
-
-3. **Instructions**
-   
-   3.1 **create amm**
-
-   https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/create_amm.rs#L1-L12
-
-   The above code defines a function named **`create_amm`** that is used to create an AMM account. It takes four parameters:
-
-1. **`ctx`**: The **`Context<CreateAmm>`** parameter contains the context data required to execute the function.
-2. **`id`**: The **`Pubkey`** parameter represents the ID for the new AMM account.
-3. **`fee`**: The **`u16`** parameter represents the LP fee (in basis points) to be set for the new AMM account.
-
-The function does the following:
-
-- It gets a mutable reference to the AMM account from the context using **`let amm = &mut ctx.accounts.amm;`**.
-- It sets the fields of the AMM account with the provided values using **`amm.id = id;`**, **`amm.admin = ctx.accounts.admin.key();`**, and **`amm.fee = fee;`**.
-- It returns **`Ok(())`** to indicate the success of the operation.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/create_amm.rs#L14-L39
-
-This code defines a struct **`CreateAmm`** using the **`Accounts`** attribute, which serves as the accounts instruction for the **`create_amm`** function.
-
-The **`CreateAmm`** struct has four fields:
-
-1. **`amm`**: An account field marked with **`init`** attribute, which represents the AMM account to be created. It uses the provided **`id`** as a seed to derive the account address, sets the required space for the account using **`Amm::LEN`**, and uses the **`payer`** account for paying rent. Additionally, it specifies a constraint to ensure that the fee is less than 10000 basis points; otherwise, it will raise the error **`TutorialError::InvalidFee`**.
-2. **`admin`**: An **`AccountInfo`** field representing the admin account for the AMM. It is read-only and not mutable.
-3. **`payer`**: A **`Signer`** field representing the account that pays for the rent of the AMM account. It is marked as mutable.
-4. **`system_program`**: A **`Program`** field representing the Solana system program, used for certain system operations.
-
-TLDR-, this code sets up the instruction structure for the **`create_amm`** function, defining how the accounts should be initialized, accessed, and used when calling the function.
-
-  3.2 **create pool**
-
-  https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/create_pool.rs#L1-L20
-
-  The above code defines a function named **`create_pool`** that creates a liquidity pool. It takes a single parameter, **`ctx`**, which represents the **`Context<CreatePool>`** used to execute the function.
-
-The function does the following:
-
-- It gets a mutable reference to the **`Pool`** account from the context using **`let pool = &mut ctx.accounts.pool;`**.
-- It sets the fields of the **`Pool`** account with the keys of the associated accounts using **`pool.amm = ctx.accounts.amm.key();`**, **`pool.mint_a = ctx.accounts.mint_a.key();`**, and **`pool.mint_b = ctx.accounts.mint_b.key();`**.
-- It returns **`Ok(())`** to indicate the success of the operation.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/create_pool.rs#L22-L101
-
-This code defines a struct named **`CreatePool`**, which serves as the accounts instruction for the **`create_pool`** function.
-
-The **`CreatePool`** struct has several fields, each representing an account that the **`create_pool`** function needs to access during its execution. The attributes applied to each field define the behavior of how the accounts are accessed and handled.
-
-Here's an explanation of each field:
-
-1. **`amm`**: An account field representing the AMM (Automated Market Maker) associated with the pool. It derives the address of the account using the seed of the AMM account.
-2. **`pool`**: An account field that will be initialized as the new liquidity pool account. It specifies the required space for the account, derives the address using seeds derived from the AMM, and ensures that **`mint_a`**'s key is less than **`mint_b`**'s key (assumes lexicographic order) to prevent invalid creation of the pool.
-3. **`pool_authority`**: An account info field representing the read-only authority account for the pool. It is used as a seed to derive the address of the **`mint_liquidity`** account.
-4. **`mint_liquidity`**: A boxed account field representing the mint for the liquidity tokens (LP tokens) of the pool. It is initialized with the provided authority and has a fixed decimal precision of 6.
-5. **`mint_a`** and **`mint_b`**: Boxed account fields representing the mints for token A and token B, respectively.
-6. **`pool_account_a`** and **`pool_account_b`**: Boxed account fields representing the associated token accounts for token A and token B, respectively, for the pool. These accounts are associated with their respective mints and have **`pool_authority`** as their authority.
-7. **`payer`**: A signer field representing the account that pays for the rent of the new accounts.
-8. **`token_program`**, **`associated_token_program`**, and **`system_program`**: Program fields representing the Solana token program, associated token program, and system program, respectively.
-
-TLDR, this code defines the accounts instruction structure for the **`create_pool`** function, specifying how the accounts should be initialized, accessed, and used when calling the function.
-
-  3.3 **deposite liquidity**
-
-  https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/deposit_liquidity.rs#L1-L30
-
-The above code defines a function named **`deposit_liquidity`** that allows depositing liquidity into the pool. It takes three parameters:
-
-1. **`ctx`**: The **`Context<DepositLiquidity>`** parameter contains the context data required to execute the function.
-2. **`amount_a`**: The **`u64`** parameter represents the amount of token A to be deposited.
-3. **`amount_b`**: The **`u64`** parameter represents the amount of token B to be deposited.
-
-The function does the following:
-
-- It checks if the depositor has enough tokens for each type (A and B) before depositing and restricts the amounts to the available balances using the **`if`** conditions.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/deposit_liquidity.rs#L32-L61
-
-This code ensures that the amounts of tokens A and B being deposited are provided in the same proportion as the existing liquidity in the pool. If this is the first deposit (pool creation), the amounts are added as is. Otherwise, the function calculates the ratio of the existing liquidity (pool_a.amount and pool_b.amount) and adjusts the amounts being deposited accordingly.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/deposit_liquidity.rs#L63-L77
-
-This code calculates the amount of liquidity that is about to be deposited into the pool. It calculates the square root of the product of **`amount_a`** and **`amount_b`**, using fixed-point arithmetic to ensure precision.
-
-If this is the first deposit (pool creation), the function checks if the calculated liquidity is greater than the **`MINIMUM_LIQUIDITY`** constant (a minimum liquidity required for the pool). If it's not, the function returns an error to indicate that the deposit is too small. Additionally, it subtracts the **`MINIMUM_LIQUIDITY`** from the calculated liquidity to lock it as the initial liquidity.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/deposit_liquidity.rs#L79-L101
-
-This code uses the token::transfer function from the Anchor SPL token crate to transfer the deposited amounts of tokens A and B from the depositor's accounts (depositor_account_a and depositor_account_b, respectively) to the pool's accounts (pool_account_a and pool_account_b, respectively). It does this through cross-program invocation (CPI) using the token program, and the authority for the transfer is the depositor.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/deposit_liquidity.rs#L102-L124
-
-This code uses the **`token::mint_to`** function from the Anchor SPL token crate to mint the liquidity tokens to the depositor. It does this through cross-program invocation (CPI) using the token program. The minting is authorized by the pool authority (**`pool_authority`**).
-
-The function calculates the correct authority bump, as required by the SPL token program, and creates the necessary seeds for the authority. It then uses the **`CpiContext::new_with_signer`** function to set up the context for the CPI with the correct authority.
-
-TRDR, this code implements the logic to deposit liquidity into the pool, ensuring correct proportions, handling the initial pool creation, and minting the corresponding liquidity tokens to the depositor.
-
- 3.4 **swap exact tokens**
-
- https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L1-L27
-
- This code defines a function named **`swap_exact_tokens_for_tokens`** that allows swapping tokens A for tokens B (and vice versa) in the AMM pool. It takes five parameters:
-
-1. **`ctx`**: The **`Context<SwapExactTokensForTokens>`** parameter contains the context data required to execute the function.
-2. **`swap_a`**: The **`bool`** parameter indicates whether tokens A should be swapped for tokens B (**`true`**) or tokens B should be swapped for tokens A (**`false`**).
-3. **`input_amount`**: The **`u64`** parameter represents the amount of tokens to be swapped.
-4. **`min_output_amount`**: The **`u64`** parameter represents the minimum expected output amount after the swap.
-
-The function does the following:
-
-- It checks if the trader has enough tokens for the input amount of the specified token (**`swap_a`**) before proceeding with the swap. If the trader doesn't have enough tokens, it uses the available amount for the swap.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L29-L31
-
-This code applies the trading fee to the input amount (input) based on the amm (AMM) account's fee value. The trading fee is subtracted from the input amount to calculate the taxed_input, which is the actual amount of tokens available for the swap after deducting the fee.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L33-L56
-
-This code calculates the output amount of the swapped token based on the taxed_input, current pool balances (pool_a.amount and pool_b.amount), and whether the swap is from token A to token B or vice versa. It uses fixed-point arithmetic to ensure precise calculations. The resulting output represents the amount of tokens the trader will receive after the swap.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L58-L60
-
-This code checks if the calculated **`output`** is less than the specified **`min_output_amount`**. If so, it returns an error, indicating that the output amount is too small.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L62-L63
-
-This code calculates the invariant of the pool, which is the product of the current balances of token A (**`pool_a.amount`**) and token B (**`pool_b.amount`**).
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L65-L123
-
-This code transfers the input and output amounts of tokens between the trader and the pool, performing the token swap. It uses the **`token::transfer`** function from the Anchor SPL token crate to transfer tokens from one account to another. The **`CpiContext`** is used for Cross-Program Invocation (CPI) to interact with the SPL token program.
-
-The code chooses the appropriate token accounts to perform the transfer based on whether the swap is from token A to token B or vice versa (**`swap_a`**). The transfer authority is specified as either **`trader`** or **`pool_authority`** based on the situation.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L124-L130
-
-This code logs a message indicating the details of the trade, including the input amount, the taxed input amount, and the output amount.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/swap_exact_tokens_for_tokens.rs#L132-L141
-
-This code reloads the pool token accounts (pool_account_a and pool_account_b) to get the updated balances after the swap. It then checks if the invariant still holds, ensuring that the product of the balances remains constant. If the invariant is violated, it returns an error.
-Finally, this code returns Ok(()) if all operations in the function executed successfully.
-
- 3.5 **withdraw liquidity**
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/withdraw_liquidity.rs#L1-L11
-
-The use statements import required modules and types for the function.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/withdraw_liquidity.rs#L13
-
-This code defines a function named **`withdraw_liquidity`** that allows a liquidity provider to withdraw their liquidity from the AMM pool. It takes two parameters:
-
-1. **`ctx`**: The **`Context<WithdrawLiquidity>`** parameter contains the context data required to execute the function.
-2. **`amount`**: The **`u64`** parameter represents the amount of liquidity tokens the provider wants to withdraw.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/withdraw_liquidity.rs#L14-L22
-
-This code sets up the authority seeds and signer seeds required for performing token transfers and burning the liquidity tokens. The authority seeds include the AMM ID, mint keys of tokens A and B, the authority seed constant, and the authority bump seed. The signer seeds are derived from the authority seeds.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/withdraw_liquidity.rs#L24-L45
-
-This code calculates the amount of token A to be transferred to the liquidity provider by performing the following steps:
-
-1. Calculate the ratio of the amount of liquidity tokens being withdrawn (**`amount`**) to the total supply of liquidity tokens (**`ctx.accounts.mint_liquidity.supply + MINIMUM_LIQUIDITY`**).
-2. Calculate the proportional amount of token A based on the pool's token A balance (**`ctx.accounts.pool_account_a.amount`**).
-3. Transfer the calculated amount of token A from the pool account to the liquidity provider's account using the **`token::transfer`** function.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/withdraw_liquidity.rs#L47-L67
-
-This code follows the same steps as above but for token B, transferring the calculated amount of token B from the pool account to the liquidity provider's account.
-
-https://github.com/solana-developers/program-examples/blob/419cb6b6c20e8b1c65711b68a4dde2527725cc1a/tokens/token-swap/anchor/programs/token-swap/src/instructions/withdraw_liquidity.rs#L69-L83
-
-This code burns the specified amount of liquidity tokens (amount) by calling the token::burn function. The liquidity tokens are destroyed, reducing the total supply.
-Finally, this code returns Ok(()) if all operations in the function executed successfully. This indicates that the liquidity withdrawal was completed without any errors.
-
-
-
-
-  
-
-
-
-
-
-
-
-
-
+### `Pool` state
+
+```
+Pool { amm: Pubkey, mint_a: Pubkey, mint_b: Pubkey, bump: u8 }
+```
+
+### PDAs
+
+| PDA | seeds | owner | stores |
+|---|---|---|---|
+| `amm` | `[id]` | this program | `Amm` |
+| `pool` | `[amm, mint_a, mint_b]` | this program | `Pool` |
+| `pool_authority` | `[amm, mint_a, mint_b, "authority"]` | System | — (signer only) |
+| `mint_liquidity` | `[amm, mint_a, mint_b, "liquidity"]` | SPL Token | LP mint (6 decimals, authority = pool_authority) |
+| `pool_account_a` / `pool_account_b` | ATA(pool_authority, mint_a|b) | SPL Token | pool reserves |
+
+## 4. Instruction lifecycle walkthrough
+
+### `create_amm(id: Pubkey, fee: u16)`
+
+**Who:** anyone. Caller becomes `admin`.
+
+**Checks:** `fee < 10_000` (`InvalidFee`).
+
+**State changes:** new `Amm` PDA with `{ id, admin = caller, fee,
+bump }`.
+
+### `create_pool()`
+
+**Who:** anyone.
+
+**Accounts:** `amm`, two mints A and B (with `mint_a < mint_b`
+enforced by seed ordering; the constraint uses lexicographic
+ordering to prevent creating both `(A, B)` and `(B, A)` pools).
+
+**State changes:**
+- New `Pool` PDA stores `{ amm, mint_a, mint_b, bump }`.
+- `pool_authority` PDA derived.
+- New LP mint with 6 decimals, authority = `pool_authority`,
+  initial supply 0.
+- Two ATAs created: `pool_account_a` (mint = A, owner =
+  `pool_authority`) and `pool_account_b` (same for B).
+
+### `deposit_liquidity(amount_a, amount_b)`
+
+**Who:** any LP.
+
+**Behaviour:**
+1. Clamp `amount_a` and `amount_b` to the LP's actual balances
+   (caps out at what they hold — so you can call with "max" values
+   safely).
+2. If this is the first deposit (`pool_a.amount == 0 && pool_b.amount
+   == 0`), use the amounts as-is. Otherwise, adjust so the ratio
+   matches the pool's: `amount_a' = amount_b * (pool_a / pool_b)`
+   or vice versa (whichever side is the limiting factor).
+3. `liquidity = sqrt(amount_a * amount_b)` using fixed-point
+   arithmetic (`fixed::types::I64F64`).
+4. If this is the first deposit:
+   - If `liquidity <= MINIMUM_LIQUIDITY` → error
+     `DepositTooSmall`.
+   - Subtract `MINIMUM_LIQUIDITY` — those LP units are never
+     minted, effectively locked forever.
+5. Transfer `amount_a` A and `amount_b` B from depositor ATAs to
+   pool ATAs.
+6. CPI `mint_to` of `liquidity` LP tokens to the depositor's LP
+   ATA, signed by `pool_authority`.
+
+**Token movements:**
+
+```
+depositor_a --[amount_a]--> pool_account_a
+depositor_b --[amount_b]--> pool_account_b
+(mint LP)   --[sqrt(a*b) - MINIMUM_LIQUIDITY if first deposit]--> depositor LP ATA
+```
+
+### `withdraw_liquidity(amount)`
+
+**Who:** LP holding LP tokens.
+
+**Behaviour:**
+1. Compute share:
+   `share_a = amount / (supply + MINIMUM_LIQUIDITY) * pool_a.amount`,
+   same for `share_b`.
+2. Burn `amount` LP tokens from the LP's account.
+3. Transfer `share_a` A and `share_b` B from the pool ATAs to the
+   LP's ATAs. Pool authority signs via seeds.
+
+**Token movements:**
+
+```
+pool_account_a --[share_a]--> lp ATA (mint A)
+pool_account_b --[share_b]--> lp ATA (mint B)
+(burn LP)  <--[amount]-- lp LP ATA
+```
+
+### `swap_exact_tokens_for_tokens(swap_a, input, min_output)`
+
+**Who:** any trader.
+
+**Behaviour:**
+1. Clamp `input` to the trader's balance of the input token.
+2. Apply fee: `taxed_input = input * (10_000 - fee) / 10_000`.
+3. Compute output using constant product:
+   ```
+   If swap_a:  output = pool_b * taxed_input / (pool_a + taxed_input)
+   Else:       output = pool_a * taxed_input / (pool_b + taxed_input)
+   ```
+   (Fixed-point `I64F64` for precision.)
+4. If `output < min_output_amount` → error `OutputTooSmall`.
+5. Record `k = pool_a * pool_b` pre-swap.
+6. Transfer `input` to the pool, `output` from the pool to the
+   trader. Pool authority signs for the outgoing leg.
+7. Reload pool ATAs; check `new_a * new_b >= k`. If not, error
+   `InvariantViolated`.
+
+**Token movements (swap_a = true):**
+
+```
+trader ATA (A) --[input]--> pool_account_a
+pool_account_b --[output]--> trader ATA (B)
+```
+
+**Checks:** `min_output`; invariant non-decrease; trader has enough
+of the input token.
+
+## 5. The constant-product invariant
+
+For a pool with reserves `(x, y)` and trade input `Δx`:
+
+```
+  (x + Δx) * (y - Δy) = x * y    (ignoring fee)
+→ Δy = y * Δx / (x + Δx)
+```
+
+Bigger `Δx` relative to `x` → worse marginal price. The curve never
+lets reserves hit zero — the price asymptotes.
+
+With a fee of `f` bps, only `Δx' = Δx * (1 - f/10000)` participates
+in the formula, but the full `Δx` enters the pool. So `k` strictly
+grows after every swap, which is how LPs earn yield.
+
+## 6. Worked example
+
+```
+1. Alice calls create_amm(id = A1, fee = 30 bps).
+   AMM stores { id: A1, admin: Alice, fee: 30, bump: <canonical> }.
+
+2. Alice calls create_pool() for (USDC, WIF).
+   Pool PDA, authority PDA, LP mint, and two pool ATAs created.
+   Reserves: 0 USDC, 0 WIF. LP supply: 0.
+
+3. Alice deposits 1_000 USDC + 10_000 WIF (she thinks they're
+   worth the same in dollars).
+   First deposit — ratio is whatever she says.
+   liquidity = sqrt(1_000 * 10_000) = 3_162 (rounded, fixed point).
+   Locked: 100. Minted to Alice: 3_062 LP.
+   Pool: 1_000 USDC, 10_000 WIF.
+
+4. Bob swaps 100 USDC for WIF.
+   taxed_input = 100 * (1 - 0.003) = 99.7.
+   output ≈ 10_000 * 99.7 / (1_000 + 99.7) ≈ 906 WIF.
+   After: pool = 1_100 USDC, 9_094 WIF.
+     k was 10_000_000; now it's 1_100 * 9_094 ≈ 10_003_400 (grew by
+     fee revenue).
+
+5. Alice withdraws all 3_062 LP tokens.
+   share_a = 3_062 / (3_062 + 100) * 1_100 ≈ 1_065 USDC.
+   share_b = 3_062 / (3_062 + 100) * 9_094 ≈ 8_806 WIF.
+   She gets more USDC than she put in, less WIF. If the market
+   price moved, she might gain or lose (impermanent loss).
+```
+
+## 7. Safety and edge cases
+
+- **Front-running pool creation.** `create_pool` leaves the ratio
+  of the first deposit to be whatever the first depositor picks.
+  An attacker watching the mempool can race an honest first LP,
+  seed the pool with a bad ratio, and arbitrage the real LP. Real
+  AMMs mitigate this by making `create_pool` and the first deposit
+  atomic or by restricting the first deposit.
+- **Clamp-to-balance silently.** `deposit_liquidity` and
+  `swap_exact_tokens_for_tokens` silently cap the input to the
+  caller's balance. This is friendly ("send whatever I have") but
+  means your slippage assumptions might be wrong if you didn't
+  have the full amount. Test with tight `min_output` tolerances.
+- **No `transfer_checked`.** Uses the older `token::transfer`,
+  which doesn't validate mint/decimals on the accounts. A
+  production AMM should use `transfer_checked`.
+- **No `InvalidMint` enforcement.** The `TutorialError::InvalidMint`
+  is defined but never emitted — the program relies on Anchor's
+  `Box<Account<'info, Mint>>` and ATA constraints to catch
+  mismatches. Probably fine for the simple case, but worth an
+  explicit audit.
+- **Fixed-point rounding.** Uses `I64F64`. Rounding favours the
+  pool on every swap, which is the correct direction (LPs gain a
+  bit, traders round down). Never the reverse.
+- **Lexicographic mint ordering.** `create_pool` requires
+  `mint_a.key() < mint_b.key()`. If a caller passes them swapped,
+  the PDA derivation silently differs; the program relies on the
+  seed constraint to reject. Clients should sort before calling.
+- **Minimum liquidity lock.** The 100 LP tokens minted to nobody
+  on pool creation are permanently stuck. Comes from Uniswap V2;
+  prevents an attacker from donating tiny amounts to a fresh pool
+  to skew the share calculation.
+- **Fee bounds.** `create_amm` enforces `fee < 10_000` (100%).
+  `fee = 9_999` technically legal — a 99.99% fee is functional
+  but useless. Real AMMs cap this at something like 100 bps.
+
+## 8. Running the tests
+
+```bash
+# Anchor
+cd anchor && anchor build && anchor test
+
+# Quasar
+cd quasar && cargo test
+```
+
+The tests create an AMM, pool, deposit, swap, and withdraw, and
+assert reserves / balances / LP supply at each step.
+
+## 9. Extending the program
+
+- **Cap fee at something sensible.** 0–100 bps is normal.
+- **Use `transfer_checked`.** Cheap upgrade; catches mint/decimal
+  mismatches.
+- **Protect pool creation.** Combine `create_pool` + first
+  `deposit_liquidity` into a single instruction, or require the
+  first deposit to match an oracle price.
+- **Concentrated liquidity.** Add tick ranges (à la Uniswap V3).
+  Much more complex — different curve per tick, lots more state.
+- **Multi-hop swaps.** A client-side batcher that chains swaps
+  across pools; teaches you how swap ordering affects slippage.
+- **Admin fees.** Route a fraction of the trading fee to the AMM
+  admin's wallet. Introduces fee switches.
+- **Oracle price feeds.** Export the current pool reserves as a
+  time-weighted average price (TWAP) for other programs to read.
