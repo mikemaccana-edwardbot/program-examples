@@ -7,7 +7,10 @@ use anchor_spl::{
 use crate::{
     constants::{COLLATERAL_VAULT_SEED, LEASED_VAULT_SEED, LEASE_SEED},
     errors::AssetLeasingError,
-    instructions::shared::{close_vault, transfer_tokens_from_vault},
+    instructions::{
+        pay_rent::update_last_paid_ts,
+        shared::{close_vault, transfer_tokens_from_vault},
+    },
     state::{Lease, LeaseStatus},
 };
 
@@ -152,6 +155,23 @@ pub fn handle_close_expired(context: Context<CloseExpired>) -> Result<()> {
         &[collateral_vault_seeds],
     )?;
 
+    // Settle rent accounting on the default path.
+    //
+    // We are not forwarding any accrued rent to the lessor here — on default
+    // the lessor takes the whole collateral vault as compensation — but we
+    // still bump \`last_rent_paid_ts\` so the invariant
+    // \`last_rent_paid_ts <= now.min(end_ts)\` stays intact. That matters for
+    // any future version of the program that wants to split the collateral
+    // differently (pro-rata rent, partial refund on default, haircut to the
+    // lessee for unused time): such a version can read
+    // \`last_rent_paid_ts\` and trust that everything up to \`now\` is already
+    // settled, rather than having to reason about whether this branch ever
+    // bumped the timestamp.
+    //
+    // No-op on the \`Listed\` branch because rent never started accruing.
+    if status == LeaseStatus::Active {
+        update_last_paid_ts(&mut context.accounts.lease, now);
+    }
     context.accounts.lease.collateral_amount = 0;
     context.accounts.lease.status = LeaseStatus::Closed;
 
