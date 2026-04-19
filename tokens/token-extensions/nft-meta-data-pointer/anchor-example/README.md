@@ -1,528 +1,407 @@
-## Token Extension MetaData Pointer NFT
+# NFT with Metadata Pointer (Token-2022)
 
-This is a simple example of a program that creates a NFT using the new token extension program and facilitating the token extension meta data pointer.
+An NFT whose `name`, `symbol`, `uri`, and **arbitrary key/value
+pairs** (`level`, `wood`) live *inside the mint account itself* via
+Token-2022's `MetadataPointer` extension. No separate Metaplex
+metadata account.
 
-The cool thing about this especially for games is that we can now have additional metadata fields onchain as a key value store which can be used to save the state of the game character. In this example we save the level and the collected wood of the player.
+Wrapped around this is a small lumberjack game: each wallet has a
+`PlayerData` PDA tracking energy (auto-refilled with time) and
+wood. Calling `chop_tree` spends 1 energy and gains 1 wood. The
+NFT represents the player and its `level` metadata field can be
+updated as they progress. Session keys (Magic Block) let mobile /
+Unity clients auto-approve transactions without constant wallet
+prompts.
 
-This opens all kind of interesting possibilities for games. You can for example save the level and xp of the player, the current weapon and armor, the current quest and so on. When market places will eventually support additional meta data the nfts could be filtered and ordered by the meta data fields and NFTs with better values like higher level could potentially gain more value by playing.
+Comes with a TypeScript Next.js client (`app/`) and a Unity client
+(`unity/`) that both talk to the same Anchor program.
 
-The nft will be created in an anchor program so it is very easy to mint from the js client. The name, uri and symbol are saved in the meta data extension which is pointed to the mint.
+## Table of contents
 
-The nft will have a name, symbol and a uri. The uri is a link to a json file which contains the meta data of the nft.
+1. [What does this program do?](#1-what-does-this-program-do)
+2. [Glossary](#2-glossary)
+3. [Accounts and PDAs](#3-accounts-and-pdas)
+4. [Instruction lifecycle walkthrough](#4-instruction-lifecycle-walkthrough)
+5. [The metadata-pointer extension in detail](#5-the-metadata-pointer-extension-in-detail)
+6. [The lazy-energy pattern](#6-the-lazy-energy-pattern)
+7. [Session keys](#7-session-keys)
+8. [Worked example](#8-worked-example)
+9. [Safety and edge cases](#9-safety-and-edge-cases)
+10. [Running the example](#10-running-the-example)
+11. [Extending the program](#11-extending-the-program)
 
-There is a video walkthrough of this example on the Solana Foundation Youtube channel.
+## 1. What does this program do?
 
-[![Solana Foundation Youtube channel]](https://www.youtube.com/@SolanaFndn/videos)
+Three instructions:
 
-# How to run this example
+1. **`init_player(level_seed)`** — creates a `PlayerData` PDA
+   (seeds `["player", signer]`) with `energy = MAX_ENERGY`,
+   `last_login = now`, `wood = 0`, `authority = signer`. Also
+   creates a shared `GameData` PDA if absent.
+2. **`chop_tree(level_seed, counter)`** — lazy-updates energy,
+   spends 1, grants 1 wood. Callable by the player's main wallet
+   OR a session key (via the `#[session_auth_or]` macro from the
+   Magic Block / Gum session-key crate).
+3. **`mint_nft()`** — creates a Token-2022 NFT with a metadata
+   pointer pointing back at the mint itself; initialises the
+   embedded metadata with `name = "Beaver"`, `symbol = "BVA"`,
+   `uri = <arweave URL>`; adds a custom `level = "1"` field;
+   creates an ATA for the player; mints 1 unit; revokes mint
+   authority.
 
-Running the tests
+The NFT *represents* the character; the `PlayerData` PDA stores
+the mutable state; metadata updates (e.g. "level up") happen by
+writing new custom fields onto the mint.
 
-```shell
-cd program
+## 2. Glossary
+
+**Token-2022 MetadataPointer extension**
+: A Token-2022 mint extension that stores a *pointer* (another
+Pubkey) indicating where the metadata for this mint lives. When
+`metadata_address == mint_address`, the metadata is stored in the
+mint's *own* TLV data — no separate account needed. Saves one
+account and keeps everything colocated.
+
+**Embedded metadata (TLV)**
+: After the core mint fields and the `MetadataPointer` TLV entry,
+the `TokenMetadata` extension adds a variable-size TLV entry with
+`name: String`, `symbol: String`, `uri: String`, plus
+`additional_metadata: Vec<(String, String)>`. Those strings are
+why this mint is allocated with extra space (`meta_data_space =
+250` in the code).
+
+**`update_field`**
+: Token-2022 `TokenMetadata` instruction that sets a custom
+key/value pair. Called by the metadata update authority. Level-ups,
+XP, equipped item IDs — all live here as strings.
+
+**`PlayerData` PDA**
+: Per-wallet game state. Seeds `["player", signer]`. Stores
+`authority, energy, last_login, wood`.
+
+**`GameData` PDA**
+: Global counter (e.g. total trees chopped). Seeds `["gameData"]`.
+Created on first `init_player`.
+
+**`nft_authority` PDA**
+: Seeds `["nft_authority"]`. Used as mint and metadata update
+authority for every NFT this program creates. Because the PDA is
+controlled by the program, the program can later update metadata
+(level-ups) without the player signing.
+
+**Session key (Magic Block / Gum)**
+: A short-lived keypair the client generates, funded with some SOL
+and authorised to sign a specific program's instructions for ~23
+hours. After that the token expires and the SOL returns. Lets
+mobile/Unity games feel like web2 apps — no wallet prompt per
+action.
+
+**`#[session_auth_or(condition, error)]`**
+: Anchor attribute macro from the session-keys crate. Before the
+handler runs, checks either:
+1. The session-key token is valid and whitelists this instruction,
+   OR
+2. The fallback `condition` is true (here: `player.authority ==
+   signer`).
+Neither passes → error `GameErrorCode::WrongAuthority`.
+
+**Lazy update**
+: Instead of a cron job adding energy every 60 seconds, the
+program computes *how much* energy should have regenerated
+between `last_login` and now whenever an instruction runs. Saves
+rent and CPU — the player's view is always correct but state
+only updates on demand.
+
+**Arweave URI**
+: The `uri` field points at an Arweave-hosted JSON descriptor (and
+image). Arweave is pay-once-store-forever storage — popular for
+NFT metadata because it's irreversible and cheap.
+
+## 3. Accounts and PDAs
+
+| name | kind | seeds | stores | who signs |
+|---|---|---|---|---|
+| `player` | PDA | `["player", signer]` | `PlayerData { authority, energy, last_login, wood }` (size 1000 bytes) | program |
+| `game_data` | PDA | `["gameData"]` | `GameData { ... }` (global state, size 1000) | program |
+| `signer` | signer, mut | SOL | — | user (main wallet or session) |
+| `mint` | keypair, init (Token-2022 mint + metadata) | — | mint + MetadataPointer ext + TokenMetadata ext (~270 bytes + fields) | mint keypair (creation), nft_authority (metadata updates) |
+| `nft_authority` | PDA | `["nft_authority"]` | — | program |
+| `token_account` | ATA (mint, signer) | — | holds 1 unit | — |
+| `token_program` | Token-2022 | — | — | — |
+| `associated_token_program`, `system_program` | programs | — | — | — |
+
+## 4. Instruction lifecycle walkthrough
+
+### `init_player(level_seed)`
+
+1. `init` on `PlayerData` PDA: 1000 bytes, payer = signer.
+2. `init_if_needed` on `GameData` PDA.
+3. Set `energy = MAX_ENERGY`, `last_login = now`, `wood = 0`,
+   `authority = signer.key()`.
+
+### `chop_tree(level_seed, counter)`
+
+1. `#[session_auth_or]` checks authorisation (session token or
+   main authority).
+2. Call `update_energy()` on the player:
+   ```rust
+   while time_passed >= TIME_TO_REFILL_ENERGY && energy < MAX_ENERGY {
+     energy += 1;
+     time_passed -= TIME_TO_REFILL_ENERGY;
+     time_spent += TIME_TO_REFILL_ENERGY;
+   }
+   ```
+3. If `energy == 0` → `Err(NotEnoughEnergy)`.
+4. Else `wood += 1`, `energy -= 1`, log.
+
+### `mint_nft()`
+
+Long sequence — this is the meat of the extension lesson:
+
+1. Compute space = `ExtensionType::try_calculate_account_len::<Mint>(
+   &[MetadataPointer]) + 250` (the 250 is padding for the embedded
+   token metadata TLV).
+2. `system::create_account(from=signer, to=mint, lamports=<rent>,
+   space, owner=token_program)`.
+3. `system::assign(mint, &token_2022::ID)`.
+4. `metadata_pointer::instruction::initialize(mint,
+   authority=Some(nft_authority), metadata_address=Some(mint))`
+   via `invoke`. Must happen *before* `initialize_mint`.
+5. `initialize_mint2(mint, decimals=0, authority=nft_authority,
+   freeze_authority=None)` via Anchor helper.
+6. Build signer seeds `[b"nft_authority", bump]`.
+7. `spl_token_metadata_interface::initialize(mint, update_authority
+   = nft_authority, mint_authority = nft_authority, name =
+   "Beaver", symbol = "BVA", uri = <arweave>)` via
+   `invoke_signed` (PDA signs as metadata update authority).
+8. `update_field(mint, key="level", value="1")` via
+   `invoke_signed`.
+9. Create ATA for (mint, signer).
+10. `mint_to(mint, ata, authority = nft_authority, amount = 1)`
+    via `invoke_signed`.
+11. `set_authority(mint, AuthorityType::MintTokens, new_authority
+    = None)` via `invoke_signed` — disables further minting.
+
+**Token movements:**
+
+```
+(no source) --[1 unit]--> player ATA (mint, owner=player)
+```
+
+Mint authority goes from `nft_authority` to `None` at the end.
+Supply locks at 1. Metadata is permanently owned by `nft_authority`
+(the program), meaning future instructions in this same program
+can update the metadata (level up).
+
+## 5. The metadata-pointer extension in detail
+
+Traditional Metaplex NFT:
+
+```
+mint (SPL-Token)       ← name/symbol/uri NOT here
+metadata PDA (Metaplex) ← name, symbol, uri
+edition PDA (Metaplex)  ← edition state
+```
+
+Three accounts, two programs.
+
+Token-2022 with `MetadataPointer` + `TokenMetadata` extensions:
+
+```
+mint (Token-2022)
+ ├── core mint fields
+ ├── TLV: MetadataPointer { authority, address = self }
+ └── TLV: TokenMetadata { name, symbol, uri,
+                          additional_metadata: [(k, v), ...] }
+```
+
+One account, one program. Cheaper, simpler, and custom fields are
+first-class.
+
+### Why `metadata_address == mint_address`?
+
+It means "the metadata is embedded in this mint". Clients reading
+the mint already have the metadata — no second RPC call needed.
+If you wanted versioned metadata or shared metadata across mints,
+you could point `metadata_address` at a separate account.
+
+### `additional_metadata`
+
+A `Vec<(String, String)>`. The example writes `("level", "1")`.
+You can write anything: `("xp", "420")`, `("weapon",
+"sword_lv3")`, etc. Marketplaces that understand Token-2022
+metadata can display and sort on these fields — the long-term
+vision of the extension.
+
+## 6. The lazy-energy pattern
+
+Common in casual games. Instead of a scheduled task pushing energy
+to every player every minute (impossibly expensive onchain), each
+transaction catches up on the regen owed since `last_login`.
+
+```
+# Client-side display (runs every second in the UI)
+elapsed = now - player.last_login
+regen = min(MAX_ENERGY - player.energy, elapsed // TIME_TO_REFILL_ENERGY)
+display_energy = player.energy + regen
+
+# Server-side (runs in update_energy during chop_tree)
+while time_passed >= TIME_TO_REFILL_ENERGY and energy < MAX_ENERGY:
+    energy += 1
+    time_passed -= TIME_TO_REFILL_ENERGY
+    time_spent += TIME_TO_REFILL_ENERGY
+```
+
+Client and server agree: the client's prediction becomes the
+server's truth as soon as the next onchain action runs. No polling
+needed — websocket account subscriptions push the update after a
+successful chop.
+
+## 7. Session keys
+
+Without session keys, every `chop_tree` would need a wallet popup.
+That's fine for "send 10 SOL" but maddening for a game where
+actions are per-second.
+
+**Flow:**
+
+1. Client generates a local keypair `S`.
+2. Client sends one transaction, signed by the player's main
+   wallet, creating a session token that whitelists `chop_tree`
+   on this program, expires in 23h, signed by `S`.
+3. Client signs subsequent `chop_tree` calls with `S` (no prompt).
+4. The program's `#[session_auth_or]` macro checks the session
+   token is live, the instruction is whitelisted, and `S` is the
+   signer.
+5. On expiry, remaining SOL in `S` flows back to the main wallet.
+
+Maintained by Magic Block / Gum — see
+[sessionkeys](https://docs.magicblock.gg/session-keys/get-started).
+Treat session keys as unaudited third-party code for now.
+
+## 8. Worked example
+
+```
+t=0:    Alice calls init_player.
+        player.authority=Alice, energy=10, wood=0, last_login=t0.
+
+t=60:   Alice calls chop_tree(counter=1).
+        update_energy: time_passed=60. Loop: energy stays 10 (cap).
+        energy -= 1 → 9. wood += 1 → 1. last_login=t0+60.
+
+t=600:  Alice calls chop_tree 9 more times.
+        energy → 0. wood → 10.
+
+t=660:  Alice calls chop_tree again.
+        update_energy: time_passed=60 since last login.
+        Loop: 1 refill. energy=1. last_login moves forward 60s.
+        energy -= 1 → 0. wood += 1 → 11.
+
+t=720:  Alice calls mint_nft.
+        - Mint M created: Token-2022, 0 decimals, MetadataPointer
+          → self.
+        - Embedded metadata: name="Beaver", symbol="BVA",
+          uri="https://arweave.net/MHK3Iopy...".
+        - additional_metadata: {"level": "1"}.
+        - Alice's ATA gets 1 unit.
+        - mint authority → None. Supply locked at 1 forever.
+```
+
+A (hypothetical) `level_up` instruction would CPI `update_field(M,
+"level", "2")` signed by `nft_authority`. The NFT's metadata
+changes onchain; marketplaces reading the mint see the new level
+immediately.
+
+## 9. Safety and edge cases
+
+- **Session key trust.** The session-key crate is third-party and
+  unaudited at the time of writing. For high-value actions, keep
+  the main wallet as the authority.
+- **Extension order.** Extensions must be initialised *before*
+  the mint itself. Swap the CPIs and you get an obscure error
+  from `spl-token-2022`.
+- **`meta_data_space = 250` is a guess.** It's enough for the
+  current name/symbol/uri + one small field. If you add many
+  custom fields, increase this or use `realloc`.
+- **ATA for Token-2022.** The associated-token program routes
+  correctly if you pass Token-2022 as `token_program`. Mixing SPL
+  Token and Token-2022 ATAs for the same mint is impossible —
+  they'd have different addresses.
+- **Mint authority revoked on `mint_nft`.** Irreversible. No one
+  can ever mint more of this NFT.
+- **`update_field` size bumps.** Adding a long string to
+  `additional_metadata` can exceed the mint's current account
+  size. The CPI errors; you'd need to `realloc` first (not done
+  in this example).
+- **`nft_authority` PDA is global.** Seeds `["nft_authority"]`
+  with no variable component → one PDA per program, used for every
+  NFT. So a player can't freeze their metadata by "removing"
+  this authority — nobody holds its key.
+- **`player.authority` check bypass.** `#[session_auth_or]`
+  explicitly allows either the session key or the main authority
+  through. If session-key code has a bug, the fallback still
+  works.
+
+## 10. Running the example
+
+### Anchor program
+
+```bash
+cd anchor
+anchor build
+anchor deploy   # local or devnet
 anchor test --detach
 ```
 
-Then you can set your https://solana.explorer.com url to local net an look at the transactions.
+After deploy, copy the program id into `anchor/Anchor.toml`,
+`anchor/programs/extension_nft/src/lib.rs`, `app/utils/anchor.ts`,
+and the Unity AnchorService. Rebuild and redeploy if you change
+the id.
 
-The program is also already deployed to dev net so you can try it out on dev net.
-Starting the js client
-
-```shell
-cd app
-yarn install
-yarn dev
-```
-
-# Minting the NFT
-
-For the creating of the NFT we perform the following steps:
-
-1. Create a mint account
-2. Initialize the mint account
-3. Create a metadata pointer account
-4. Initialize the metadata pointer account
-5. Create the metadata account
-6. Initialize the metadata account
-7. Create the associated token account
-8. Mint the token to the associated token account
-9. Freeze the mint authority
-
-Here is the rust code for the minting of the NFT:
-
-```rust
-let space = ExtensionType::try_calculate_account_len::<Mint>(
-        &[ExtensionType::MetadataPointer])
-        .unwrap();
-
-    // This is the space required for the metadata account.
-    // We put the meta data into the mint account at the end so we
-    // don't need to create and additional account.
-    let meta_data_space = 250;
-
-    let lamports_required = (Rent::get()?).minimum_balance(space + meta_data_space);
-
-    msg!(
-        "Create Mint and metadata account size and cost: {} lamports: {}",
-        space as u64,
-        lamports_required
-    );
-
-    system_program::create_account(
-        CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            system_program::CreateAccount {
-                from: ctx.accounts.signer.to_account_info(),
-                to: ctx.accounts.mint.to_account_info(),
-            },
-        ),
-        lamports_required,
-        space as u64,
-        &ctx.accounts.token_program.key(),
-    )?;
-
-    // Assign the mint to the token program
-    system_program::assign(
-        CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            system_program::Assign {
-                account_to_assign: ctx.accounts.mint.to_account_info(),
-            },
-        ),
-        &token_2022::ID,
-    )?;
-
-    // Initialize the metadata pointer (Need to do this before initializing the mint)
-    let init_meta_data_pointer_ix =
-    spl_token_2022::extension::metadata_pointer::instruction::initialize(
-        &Token2022::id(),
-        &ctx.accounts.mint.key(),
-        Some(ctx.accounts.nft_authority.key()),
-        Some(ctx.accounts.mint.key()),
-    )
-    .unwrap();
-
-    invoke(
-        &init_meta_data_pointer_ix,
-        &[
-            ctx.accounts.mint.to_account_info(),
-            ctx.accounts.nft_authority.to_account_info()
-        ],
-    )?;
-
-    // Initialize the mint cpi
-    let mint_cpi_ix = CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
-        token_2022::InitializeMint2 {
-            mint: ctx.accounts.mint.to_account_info(),
-        },
-    );
-
-    token_2022::initialize_mint2(
-        mint_cpi_ix,
-        0,
-        &ctx.accounts.nft_authority.key(),
-        None).unwrap();
-
-    // We use a PDA as a mint authority for the metadata account because
-    // we want to be able to update the NFT from the program.
-    let seeds = b"nft_authority";
-    let bump = ctx.bumps.nft_authority;
-    let signer: &[&[&[u8]]] = &[&[seeds, &[bump]]];
-
-    msg!("Init metadata {0}", ctx.accounts.nft_authority.to_account_info().key);
-
-    // Init the metadata account
-    let init_token_meta_data_ix =
-    &spl_token_metadata_interface::instruction::initialize(
-        &spl_token_2022::id(),
-        ctx.accounts.mint.key,
-        ctx.accounts.nft_authority.to_account_info().key,
-        ctx.accounts.mint.key,
-        ctx.accounts.nft_authority.to_account_info().key,
-        "Beaver".to_string(),
-        "BVA".to_string(),
-        "https://arweave.net/MHK3Iopy0GgvDoM7LkkiAdg7pQqExuuWvedApCnzfj0".to_string(),
-    );
-
-    invoke_signed(
-        init_token_meta_data_ix,
-        &[ctx.accounts.mint.to_account_info().clone(), ctx.accounts.nft_authority.to_account_info().clone()],
-        signer,
-    )?;
-
-    // Update the metadata account with an additional metadata field in this case the player level
-    invoke_signed(
-        &spl_token_metadata_interface::instruction::update_field(
-            &spl_token_2022::id(),
-            ctx.accounts.mint.key,
-            ctx.accounts.nft_authority.to_account_info().key,
-            spl_token_metadata_interface::state::Field::Key("level".to_string()),
-            "1".to_string(),
-        ),
-        &[
-            ctx.accounts.mint.to_account_info().clone(),
-            ctx.accounts.nft_authority.to_account_info().clone(),
-        ],
-        signer
-    )?;
-
-    // Create the associated token account
-    associated_token::create(
-        CpiContext::new(
-        ctx.accounts.associated_token_program.to_account_info(),
-        associated_token::Create {
-            payer: ctx.accounts.signer.to_account_info(),
-            associated_token: ctx.accounts.token_account.to_account_info(),
-            authority: ctx.accounts.signer.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-            token_program: ctx.accounts.token_program.to_account_info(),
-        },
-    ))?;
-
-    // Mint one token to the associated token account of the player
-    token_2022::mint_to(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            token_2022::MintTo {
-                mint: ctx.accounts.mint.to_account_info(),
-                to: ctx.accounts.token_account.to_account_info(),
-                authority: ctx.accounts.nft_authority.to_account_info(),
-            },
-            signer
-        ),
-        1,
-    )?;
-
-    // Freeze the mint authority so no more tokens can be minted to make it an NFT
-    token_2022::set_authority(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            token_2022::SetAuthority {
-                current_authority: ctx.accounts.nft_authority.to_account_info(),
-                account_or_mint: ctx.accounts.mint.to_account_info(),
-            },
-            signer
-        ),
-        AuthorityType::MintTokens,
-        None,
-    )?;
-```
-
-
-
-
-The example is based on the Solana Games Preset
-
-```shell
-npx create-solana-game gamName
-```
-
-# Solana Game Preset
-
-This game is ment as a starter game for onchain games.
-There is a js and a unity client for this game and both are talking to a solana anchor program.
-
-This game uses gum session keys for auto approval of transactions.
-Note that neither the program nor session keys are audited. Use at your own risk.
-
-# How to run this example
-
-## Quickstart
-
-The unity client and the js client are both connected to the same program and should work out of the box connecting to the already deployed program.
-
-### Unity
-Open the Unity project with Unity Version 2021.3.32.f1 (or similar), open the GameScene or LoginScene and hit play.
-Use the editor login button in the bottom left. If you cant get devnet sol you can copy your address from the console and use the faucet here: https://faucet.solana.com/ to request some sol.
-
-### Js Client
-To start the js client open the project in visual studio code and run:
+### TypeScript client (Next.js)
 
 ```bash
 cd app
 yarn install
 yarn dev
+# open http://localhost:3000
 ```
 
-To start changing the program and connecting to your own program follow the steps below.
+### Unity client
 
-## Installing Solana dependencies
+Open the Unity project with Unity 2021.3.32f1 or similar. Open
+`GameScene` or `LoginScene` and hit Play. Use the editor login
+button (bottom-left) to set up a test wallet.
 
-Follow the installation here: https://www.anchor-lang.com/docs/installation
-Install the latest 1.16 solana version (1.17 is not supported yet)
-sh -c "$(curl -sSfL https://release.solana.com/v1.16.18/install)"
-
-Anchor program
-1. Install the [Anchor CLI](https://project-serum.github.io/anchor/getting-started/installation.html)
-2. `cd anchor` to end the program directory
-3. Run `anchor build` to build the program
-4. Run `anchor deploy` to deploy the program
-5. Copy the program id from the terminal into the lib.rs, anchor.toml and within the unity project in the AnchorService and if you use js in the anchor.ts file
-6. Build and deploy again
-
-Next js client
-1. Install [Node.js](https://nodejs.org/en/download/)
-2. Copy the program id into app/utils/anchor.ts
-2. `cd app` to end the app directory
-3. Run `yarn install` to install node modules
-4. Run `yarn dev` to start the client
-5. After doing changes to the anchor program make sure to copy over the types from the program into the client so you can use them. You can find the js types in the target/idl folder.
-
-Unity client
-1. Install [Unity](https://unity.com/)
-2. Open the MainScene
-3. Hit play
-4. After doing changes to the anchor program make sure to regenerate the C# client: https://solanacookbook.com/gaming/porting-anchor-to-unity.html#generating-the-client
-Its done like this (after you have build the program):
+Regenerating the C# client after program changes:
 
 ```bash
-cd program
-dotnet tool install Solana.Unity.Anchor.Tool <- run once
+dotnet tool install Solana.Unity.Anchor.Tool  # once
+cd anchor
 dotnet anchorgen -i target/idl/extension_nft.json -o target/idl/ExtensionNft.cs
+# then copy the generated file into the Unity project
 ```
 
-(Replace extension_nft with the name of your program)
+## 11. Extending the program
 
-then copy the c# code into the unity project.
+- **Level up.** Add `level_up()` that increments
+  `player.level` and CPIs `update_field(mint, "level",
+  player.level.to_string())`.
+- **More fields.** Track `xp`, `weapon`, `last_kill_timestamp`.
+  Anything string-encodable.
+- **Per-rarity mints.** Weight the NFT's attributes on mint (roll
+  a random stat set, store in metadata).
+- **Collection support.** Add a `Collection` extension pointing
+  at a collection mint; verify in a follow-up instruction.
+- **Royalties.** Use the `TransferFee` extension to take a fee
+  on every transfer.
+- **Audit session keys.** If you ship for real, pin a specific
+  session-keys version and read its source. Unaudited crates in
+  mainnet authentication logic are a bad idea.
 
-## Connect to local host (optional)
-To connect to local host from Unity add these links on the wallet holder game object:
-http://localhost:8899
-ws://localhost:8900
+## References
 
-## Video walkthroughs
-Here are two videos explaining the energy logic and session keys:
-Session keys:
-https://www.youtube.com/watch?v=oKvWZoybv7Y&t=17s&ab_channel=Solana
-Energy system:
-https://www.youtube.com/watch?v=YYQtRCXJBgs&t=4s&ab_channel=Solana
-
-# Project structure
-The anchor project is structured like this:
-
-The entry point is in the lib.rs file. Here we define the program id and the instructions.
-The instructions are defined in the instructions folder.
-The state is defined in the state folder.
-
-So the calls arrive in the lib.rs file and are then forwarded to the instructions.
-The instructions then call the state to get the data and update it.
-
-```shell
-├── src
-│   ├── instructions
-│   │   ├── chop_tree.rs
-│   │   ├── init_player.rs
-│   │   └── update_energy.rs
-│   ├── state
-│   │   ├── game_data.rs
-│   │   ├── mod.rs
-│   │   └── player_data.rs
-│   ├── lib.rs
-│   └── constants.rs
-│   └── errors.rs
-
-```
-
-The project uses session keys (maintained by Magic Block) for auto approving transactions using an expiring token.
-
-# Energy System
-
-Many casual games in traditional gaming use energy systems. This is how you can build it onchain.
-
-If you have no prior knowledge in solana and rust programming it is recommended to start with the Solana cookbook [Hello world example]([https://unity.com/](https://solanacookbook.com/gaming/hello-world.html#getting-started-with-your-first-solana-game)).
-
-## Anchor program
-
-Here we will build a program which refills energy over time which the player can then use to perform actions in the game.
-In our example it will be a lumber jack which chops trees. Every tree will reward on wood and cost one energy.
-
-### Creating the player account
-
-First the player needs to create an account which saves the state of our player. Notice the last_login time which will save the current unix time stamp of the player he interacts with the program.
-Like this we will be able to calculate how much energy the player has at a certain point in time.
-We also have a value for wood which will store the wood the lumber jack chucks in the game.
-
-```rust
-
-pub fn init_player(ctx: Context<InitPlayer>) -> Result<()> {
-    ctx.accounts.player.energy = MAX_ENERGY;
-    ctx.accounts.player.last_login = Clock::get()?.unix_timestamp;
-    ctx.accounts.player.authority = ctx.accounts.signer.key();
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct InitPlayer<'info> {
-    #[account(
-        init,
-        payer = signer,
-        space = 1000, // 8+32+x+1+8+8+8 But taking 1000 to have space to expand easily.
-        seeds = [b"player".as_ref(), signer.key().as_ref()],
-        bump,
-    )]
-    pub player: Account<'info, PlayerData>,
-
-    #[account(
-        init_if_needed,
-        payer = signer,
-        space = 1000, // 8 + 8 for anchor account discriminator and the u64. Using 1000 to have space to expand easily.
-        seeds = [b"gameData".as_ref()],
-        bump,
-    )]
-    pub game_data: Account<'info, GameData>,
-
-    #[account(mut)]
-    pub signer: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-```
-
-### Chopping trees
-
-Then whenever the player calls the chop_tree instruction we will check if the player has enough energy and reward him with one wood.
-
-```rust
-    #[error_code]
-    pub enum ErrorCode {
-        #[msg("Not enough energy")]
-        NotEnoughEnergy,
-    }
-
-    pub fn chop_tree(mut ctx: Context<ChopTree>) -> Result<()> {
-        let account = &mut ctx.accounts;
-        update_energy(account)?;
-
-        if ctx.accounts.player.energy == 0 {
-            return err!(ErrorCode::NotEnoughEnergy);
-        }
-
-        ctx.accounts.player.wood = ctx.accounts.player.wood + 1;
-        ctx.accounts.player.energy = ctx.accounts.player.energy - 1;
-        msg!("You chopped a tree and got 1 log. You have {} wood and {} energy left.", ctx.accounts.player.wood, ctx.accounts.player.energy);
-        Ok(())
-    }
-```
-
-### Calculating the energy
-
-The interesting part happens in the update_energy function. We check how much time has passed and calculate the energy that the player will have at the given time.
-The same thing we will also do in the client. So we basically lazily update the energy instead of polling it all the time.
-The is a common technic in game development.
-
-```rust
-
-const TIME_TO_REFILL_ENERGY: i64 = 60;
-const MAX_ENERGY: u64 = 10;
-
-pub fn update_energy(&mut self) -> Result<()> {
-    // Get the current timestamp
-    let current_timestamp = Clock::get()?.unix_timestamp;
-
-    // Calculate the time passed since the last login
-    let mut time_passed: i64 = current_timestamp - self.last_login;
-
-    // Calculate the time spent refilling energy
-    let mut time_spent = 0;
-
-    while time_passed >= TIME_TO_REFILL_ENERGY && self.energy < MAX_ENERGY {
-        self.energy += 1;
-        time_passed -= TIME_TO_REFILL_ENERGY;
-        time_spent += TIME_TO_REFILL_ENERGY;
-    }
-
-    if self.energy >= MAX_ENERGY {
-        self.last_login = current_timestamp;
-    } else {
-        self.last_login += time_spent;
-    }
-
-    Ok(())
-}
-```
-
-## Js client
-
-### Subscribe to account updates
-
-It is possible to subscribe to account updates via a websocket. This get updates to this account pushed directly back to the client without the need to poll this data. This allows fast gameplay because the updates usually arrive after around 500ms.
-
-```js
-useEffect(() => {
-    if (!publicKey) {return;}
-    const [pda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("player", "utf8"),
-        publicKey.toBuffer()],
-        new PublicKey(ExtensionNft_PROGRAM_ID)
-      );
-    try {
-      program.account.playerData.fetch(pda).then((data) => {
-        setGameState(data);
-      });
-    } catch (e) {
-      window.alert("No player data found, please init!");
-    }
-
-    connection.onAccountChange(pda, (account) => {
-        setGameState(program.coder.accounts.decode("playerData", account.data));
-    });
-
-  }, [publicKey]);
-```
-
-### Calculate energy and show countdown
-
-In the java script client we can then perform the same logic and show a countdown timer for the player so that he knows when the next energy will be available:
-
-```js
-const interval = setInterval(async () => {
-    if (gameState == null || gameState.lastLogin == undefined || gameState.energy >= 10) {
-        return;
-    }
-
-    const lastLoginTime = gameState.lastLogin * 1000;
-    const currentTime = Date.now();
-    const timePassed = (currentTime - lastLoginTime) / 1000;
-
-    while (timePassed > TIME_TO_REFILL_ENERGY && gameState.energy < MAX_ENERGY) {
-        gameState.energy++;
-        gameState.lastLogin += TIME_TO_REFILL_ENERGY;
-        timePassed -= TIME_TO_REFILL_ENERGY;
-    }
-
-    setTimePassed(timePassed);
-
-    const nextEnergyIn = Math.floor(TIME_TO_REFILL_ENERGY - timePassed);
-    setEnergyNextIn(nextEnergyIn > 0 ? nextEnergyIn : 0);
-    }, 1000);
-
-    return () => clearInterval(interval);
-}, [gameState, timePassed]);
-
-...
-
-{(gameState && <div className="flex flex-col items-center">
-    {("Wood: " + gameState.wood + " Energy: " + gameState.energy + " Next energy in: " + nextEnergyIn )}
-</div>)}
-
-  ```
-
-## Unity client
-
-In the Unity client everything interesting happens in the AnchorService.
-To generate the client code you can follow the instructions here: https://solanacookbook.com/gaming/porting-anchor-to-unity.html#generating-the-client
-
-```bash
-cd program
-dotnet tool install Solana.Unity.Anchor.Tool <- run once
-dotnet anchorgen -i target/idl/extension_nft.json -o target/idl/ExtensionNft.cs
-```
-
-### Session keys
-
-Session keys is an optional component. What it does is creating a local key pair which is toped up with some sol which can be used to autoapprove transactions. The session token is only allowed on certain functions of the program and has an expiry of 23 hours. Then the player will get the sol back and can create a new session.
-
-With this you can now build any energy based game and even if someone builds a bot for the game the most he can do is play optimally, which maybe even easier to achieve when playing normally depending on the logic of your game.
-
-This game becomes even better when combined with the Token example from Solana Cookbook and you actually drop some spl token to the players.
+- [Token-2022 metadata pointer docs](https://spl.solana.com/token-2022/extensions#metadata-pointer)
+- [Solana Foundation gaming playlist](https://www.youtube.com/@SolanaFndn/videos)
+- [Session keys (Magic Block)](https://docs.magicblock.gg/session-keys/)
+- [Anchor to Unity](https://solanacookbook.com/gaming/porting-anchor-to-unity.html)

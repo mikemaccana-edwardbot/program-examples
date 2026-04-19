@@ -1,38 +1,48 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# TypeScript / Next.js client — NFT with Metadata Pointer
 
-## Getting Started
+A Next.js (`create-next-app`) front-end for the lumberjack +
+Token-2022 NFT example. See the parent [README](../README.md) for
+the full context.
 
-First, run the development server:
+## Running locally
 
 ```bash
-npm run dev
-# or
+yarn install
 yarn dev
-# or
-pnpm dev
+# open http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+By default, `utils/anchor.ts` points at the program id already
+deployed to devnet. If you redeploy with your own id, update that
+file.
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+## What the client does
 
-[API routes](https://nextjs.org/docs/api-routes/introduction) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+- Connects a wallet (Phantom, Solflare, Backpack).
+- Calls `init_player` on first use.
+- Subscribes to the player's `PlayerData` PDA via
+  `connection.onAccountChange` — state updates arrive via
+  WebSocket instead of polling.
+- Runs the same lazy-energy calculation as the program
+  (`update_energy` equivalent in TypeScript) to display a live
+  countdown until the next energy point.
+- Calls `chop_tree` when the player clicks.
+- Calls `mint_nft` to mint the player's character NFT.
+- Optionally manages session keys for auto-approved gameplay.
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/api-routes/introduction) instead of React pages.
+## Regenerating types
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+The Anchor IDL lives in `../anchor/target/idl/extension_nft.json`
+after `anchor build`. Copy the TypeScript types from
+`../anchor/target/types/extension_nft.ts` into `utils/` so the
+client stays in sync with the program.
 
-## Learn More
+## Tech
 
-To learn more about Next.js, take a look at the following resources:
+- [Next.js](https://nextjs.org/) — React app framework.
+- `@coral-xyz/anchor` — typed Anchor client.
+- `@solana/web3.js` — base Solana client.
+- `next/font` — optimises the Inter font.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+Standard Next.js pages live in `pages/`; API routes (empty in this
+example) would live in `pages/api/`.
