@@ -1,60 +1,280 @@
-# Cross Program Invocation (CPI)
+# Cross-Program Invocation (CPI)
 
-A cross-program invocation *literally* means invoking a program from another program (hence the term "cross-program"). There's really nothing special about it besides that. You're leveraging other programs from within your program to conduct business on Solana accounts.   
+Two programs: `lever` (owns a single bool account, `PowerStatus`,
+with a `switch_power` instruction that toggles it) and `hand` (has
+one instruction, `pull_lever`, that CPIs into the lever program).
 
-Whether or not you should send instructions to a program using a cross-program invocation or a client RPC call is a design choice that's completely up to the developer.   
+The purpose is to show a tiny, self-contained CPI: how to declare
+the callee program in your accounts, build a `CpiContext` /
+`Instruction`, and let the runtime hand control to another program
+mid-transaction.
 
-There are many design considerations when making this decision, but the most common one to acknowledge is a **dependent operation** embedded in your program.   
+## Table of contents
 
-Consider the below sequence of operations of an example **token mint** program:
-1. Create & initialize the mint.
-2. Create a metadata account for that mint.
-3. Create & initialize a user's token account for that mint.
-4. Mint some tokens to the user's token account.
+1. [What does this program do?](#1-what-does-this-program-do)
+2. [Glossary](#2-glossary)
+3. [Accounts and PDAs](#3-accounts-and-pdas)
+4. [Instruction lifecycle walkthrough](#4-instruction-lifecycle-walkthrough)
+5. [Worked example](#5-worked-example)
+6. [Safety and edge cases](#6-safety-and-edge-cases)
+7. [Running the tests](#7-running-the-tests)
+8. [Framework differences](#8-framework-differences)
+9. [Extending the program](#9-extending-the-program)
 
-In the above steps, we can't create a metadata account without first creating a mint! In fact, we have to do all of these operations in order.   
+## 1. What does this program do?
 
-Let's say we decided it was essential to have our mint (operation 1) and our "mint to user" (operation 4) tasks onchain. We would have no choice but to also include the other two operations, since we can't do operation #1, pause the program while we do #2 & #3 from the client, and then resume the program for #4.
+- **`lever`** owns `PowerStatus { is_on: bool }`. It has
+  `initialize` (creates a new `PowerStatus` account) and
+  `switch_power(name: String)` (flips the bool, logs who flipped
+  it).
+- **`hand`** has `pull_lever(name: String)`. It builds a CPI to
+  `lever::switch_power` and forwards the name.
 
-#### Notes on Native setup:
+Outcome of calling `hand::pull_lever(name)`:
 
-With the `native` implementation, you have to do a little bit of lifting to import one crate into another within your Cargo workspace.   
+```
+lever.PowerStatus.is_on ^= 1    # toggled
+log: "<name> is pulling the power switch!"
+log: "The power is now on." | "The power is now off!"
+```
 
-This is because a Solana Program needs to have a single entry point. This means a Solana Program that depends on
-other Solana Programs needs a way to disable the other entry points. This is done using `[features]` in Cargo. 
+## 2. Glossary
 
-Add the `no-entrypoint` feature to Cargo.toml of the `lever` crate:
+**Cross-Program Invocation (CPI)**
+: One program calling another within the same transaction. The
+callee runs with its own program id, its own `AccountInfo`s, but
+shares the transaction's compute budget and signers.
+
+**Signer (inside a CPI)**
+: A signature granted by the outer transaction carries into a CPI
+automatically. A program can also "sign" for PDAs it owns using
+`invoke_signed` + seeds. This example doesn't use
+`invoke_signed` — the `PowerStatus` account is already authored
+and writable, no PDA signing needed.
+
+**`CpiContext` (Anchor)**
+: A small wrapper around (program id, accounts, optional signer
+seeds) used by Anchor's generated CPI helpers. `CpiContext::new(...)`
+for unsigned CPIs; `::new_with_signer(..., seeds)` for PDA CPIs.
+
+**`declare_program!` (Anchor)**
+: A macro that reads a foreign program's IDL (placed in `idls/`) and
+generates typed CPI stubs — `lever::cpi::switch_power`,
+`lever::cpi::accounts::SwitchPower`, etc.
+
+**`no-entrypoint` feature (Native)**
+: A Cargo feature trick to import one Solana program crate into
+another without linking two `entrypoint!`s. Building `lever` as a
+library from within `hand` enables the feature to suppress the
+entrypoint macro. See "Native gotcha" in §8.
+
+**Borsh**
+: The binary serialisation format Solana uses by convention. The
+native variant builds the CPI instruction with
+`Instruction::new_with_borsh`, borsh-serialising the argument
+struct into the instruction data bytes.
+
+## 3. Accounts and PDAs
+
+No PDAs. Every account is a plain keypair or signer.
+
+### `lever::initialize`
+
+| name | kind | stores | who signs |
+|---|---|---|---|
+| `power` | keypair, init | `PowerStatus { is_on: bool }` | keypair (at creation) |
+| `user` | signer, mut | SOL (pays rent) | user |
+| `system_program` | program | — | — |
+
+### `lever::switch_power`
+
+| name | kind | stores | who signs |
+|---|---|---|---|
+| `power` | mut | `PowerStatus` | — (no signer required) |
+
+### `hand::pull_lever`
+
+| name | kind | stores | who signs |
+|---|---|---|---|
+| `power` | mut | `PowerStatus` (passed through to lever) | — |
+| `lever_program` | program | — | — |
+
+## 4. Instruction lifecycle walkthrough
+
+### `lever::initialize`
+
+Creates a fresh `PowerStatus` account owned by the lever program,
+sized `discriminator + bool`. `user` pays rent.
+
+### `lever::switch_power(name)`
+
+Toggles `power.is_on`, logs two messages. Nothing else.
+
+### `hand::pull_lever(name)` — the CPI
+
+1. Caller submits a transaction with one instruction targeting `hand`.
+   Accounts: `power`, `lever_program`.
+2. `hand` constructs a CPI to `lever::switch_power`:
+   - **Anchor path:** `switch_power(CpiContext::new(lever_program,
+     SwitchPower { power }), name)`. Anchor's generated client does
+     the discriminator, borsh serialisation, and
+     `invoke(&ix, &[power])` for you.
+   - **Native path:** builds an `Instruction` by hand with
+     `Instruction::new_with_borsh(lever_program_id,
+     &SetPowerStatus { name }, vec![AccountMeta::new(power, false)])`
+     then `invoke(&ix, &[power.clone()])`.
+3. The runtime transfers control to `lever`. Its
+   `process_instruction` deserialises the bytes, falls through the
+   `SetPowerStatus` arm, and flips `is_on`.
+4. Control returns to `hand`, which returns `Ok(())`.
+
+**Call graph:**
+
+```
+tx signed by user
+ └── hand::pull_lever(name)
+      └── invoke(Instruction{target=lever, data=SetPowerStatus{name}, accounts=[power]})
+           └── lever::switch_power(name)
+                └── mutates power.is_on
+```
+
+**State changes:** `power.is_on = !power.is_on`.
+
+**Token movements:** none at `switch_power` / `pull_lever` time.
+`initialize` transfers rent lamports from `user` to `power`.
+
+## 5. Worked example
+
+```
+1. Alice calls lever::initialize with keypair K for the power account.
+   - power.is_on = false
+   - Alice pays rent (~0.00089 SOL for bool + 8-byte discriminator)
+
+2. Alice calls hand::pull_lever("Alice"), passing power=K, lever_program=lever.
+   Logs:
+     Program <hand> invoke [1]
+     Program <lever> invoke [2]
+     Program log: Alice is pulling the power switch!
+     Program log: The power is now on.
+     Program <lever> success
+     Program <hand> success
+   power.is_on = true.
+
+3. Bob calls hand::pull_lever("Bob"), power=K.
+   Logs:
+     Bob is pulling the power switch!
+     The power is now off!
+   power.is_on = false.
+```
+
+Note that in step 3, Bob didn't initialise or own `K` — the lever
+program intentionally has no access control on `switch_power`.
+Anyone with a writable reference to the account can toggle it.
+
+## 6. Safety and edge cases
+
+- **No access control on `switch_power`.** Any signer can flip the
+  switch. For a real program you'd add an `authority` field on
+  `PowerStatus` and constrain it.
+- **Account owner check.** Anchor verifies `power` is owned by
+  `lever` via the account discriminator. In native code, `lever`
+  deserialises `PowerStatus::try_from_slice(&power.data)` which
+  accepts any 1-byte data — so a malicious caller could pass an
+  attacker-owned account with fabricated `is_on` bytes. A production
+  native program must check `power.owner == program_id`.
+- **CPI depth.** Solana caps CPI depth at 4 levels. Here we go
+  depth 2 (client → hand → lever), well under the limit.
+- **Compute budget.** The CPI shares the transaction's 200 000 CU.
+  Tiny programs like this consume <5 000 CU.
+- **Instruction data parsing order (native lever).** `lever` tries
+  `PowerStatus::try_from_slice` first, then `SetPowerStatus`. A
+  `PowerStatus { is_on: bool }` serialises to a single byte (`0x00`
+  or `0x01`). A `SetPowerStatus { name }` starts with a 4-byte
+  little-endian length prefix. Collision is unlikely but this
+  dispatch style (try-decode) is fragile — in production you'd use
+  an explicit discriminant byte (as the `counter` native variant
+  does).
+- **`no-entrypoint` feature required.** If `hand`'s `Cargo.toml`
+  imports `lever` without the `no-entrypoint` feature, you'll get
+  a link error ("multiple definitions of `entrypoint`"). See §8.
+
+## 7. Running the tests
+
+```bash
+# Anchor
+cd anchor && anchor build && anchor test
+
+# Native
+cd native && cargo build-sbf && pnpm install && pnpm test
+
+# Quasar
+cd quasar/lever && quasar build && cd ../hand && quasar build && cargo test
+```
+
+The tests initialise `PowerStatus`, call `hand::pull_lever` twice,
+and assert `is_on` ends up `false` again after two flips.
+
+## 8. Framework differences
+
+| Variant | CPI helper | IDL handling | Notes |
+|---|---|---|---|
+| `anchor/` | `CpiContext::new(...) + switch_power(ctx, name)` | `declare_program!(lever)` reads `idls/lever.json` and generates typed stubs | Checks account owner automatically |
+| `native/` | `Instruction::new_with_borsh(...) + invoke(...)` | None — the callee's `SetPowerStatus` struct is imported directly as a Rust type | Requires `no-entrypoint` Cargo feature |
+| `quasar/` | `BufCpiCall` — build discriminator + borsh by hand | None — uses a marker type implementing `Id` | Lowest-level; explicit wire format |
+
+### Native gotcha: `no-entrypoint`
+
+A Solana program crate has exactly one `entrypoint!(...)`. Importing
+one program crate into another would try to link two, which the
+linker rejects. The fix is a Cargo feature:
+
+In the callee (`lever`) `Cargo.toml`:
+
 ```toml
 [features]
 no-entrypoint = []
 ```
-Then, in the `hand` crate, use the import just like we did in the `anchor` example:
-```toml
-[dependencies]
-...
-lever = { path = "../lever", features = [ "no-entrypoint" ] }
-```
-Lastly, add this annotation over the `entrypoint!` macro that you wish to disable on import (the child program):
+
+And guard the macro:
+
 ```rust
 #[cfg(not(feature = "no-entrypoint"))]
 entrypoint!(process_instruction);
 ```
 
-The above configuration defines `no-entrypoint` as a _feature_ in the `lever` crate. This controls whether the line
-`entrypoint!(process_instruction)` gets compiled or not depending on how the `lever` crate is included as a dependency. 
+In the caller (`hand`) `Cargo.toml`:
 
-When adding `lever` as a dependency in the Cargo.tml of `hand` crate, we configure it with `features = [ "no-entrypoint" ]` 
-this makes sure that the `entrypoint!(process_instruction)` line is not part of the compilation. This ensures that only
-the `entrypoint!(process_instruction)` from the `hand` crate is part of the compilation.
+```toml
+[dependencies]
+lever = { path = "../lever", features = ["no-entrypoint"] }
+```
 
-For more about how `[features]` see [Features chapter in the Rust Book](https://doc.rust-lang.org/cargo/reference/features.html)
+Now the `entrypoint!` compiles when `lever` builds standalone, and
+disappears when `hand` imports it.
 
-### Let's switch the power on and off using a CPI!   
+### Quasar gotcha: no `declare_program!`
 
-<img src="istockphoto-1303616086-612x612.jpeg" alt="lever" width="128" align="center"/>
+Quasar doesn't have an IDL-driven CPI generator yet. The `hand`
+program declares a marker type implementing `Id` with the lever's
+address, uses `Program<LeverProgram>` in accounts (for compile-time
+address + executable checks), and builds the wire format manually
+with `BufCpiCall`. More verbose than Anchor, but no IDL juggling.
 
-In this example, we're just going to simulate a simple CPI - using one program's method from another program.   
+## 9. Extending the program
 
-Inside our `hand` program's `pull_lever` function, there's a cross-program invocation to our `lever` program's `switch_power` method.   
-
-Simply put, **our hand program will pull the lever on the lever program to switch the power on and off**.
+- **Add access control.** Store `authority: Pubkey` on
+  `PowerStatus`; have `switch_power` check `ctx.accounts.authority ==
+  stored_authority`. Forces the hand program to forward a signer in
+  the CPI.
+- **`invoke_signed` with a PDA.** Make `power` a PDA owned by
+  `lever`, and have `hand` sign for it in the CPI using seeds only
+  `hand` knows. Demonstrates delegated write authority via PDA.
+- **Return data.** Use `set_return_data` / `get_return_data` in
+  `switch_power` so `hand` can read the new `is_on` after the CPI.
+- **Chain a third program.** Add a `finger` program that calls
+  `hand` which calls `lever`. Shows how CPI depth accumulates
+  (limit: 4).
+- **Replace CPI with direct client call.** Put two instructions in
+  one transaction from the client: `hand::log_something` +
+  `lever::switch_power`. Same net effect, no CPI — a useful
+  comparison for when CPI is worth it.
