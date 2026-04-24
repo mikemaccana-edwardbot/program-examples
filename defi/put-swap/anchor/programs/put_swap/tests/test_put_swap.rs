@@ -1,6 +1,6 @@
-//! Integration tests for the synthetic_exposure protective-put primitive.
+//! Integration tests for the put_swap protective-put primitive.
 //!
-//! Each test boots a fresh LiteSVM, loads the compiled synthetic_exposure
+//! Each test boots a fresh LiteSVM, loads the compiled put_swap
 //! and mock_pyth .so files, seeds a Pyth-owned price account directly via
 //! `LiteSVM::set_account`, and drives a full lifecycle from create to
 //! settle / cancel / liquidate.
@@ -24,7 +24,7 @@ use {
         send_transaction_from_instructions,
     },
     solana_signer::Signer,
-    synthetic_exposure::{
+    put_swap::{
         constants::{ASSET_VAULT_SEED, COLLATERAL_VAULT_SEED, SWAP_SEED},
         oracle::{PRICE_UPDATE_V2_DISCRIMINATOR, PYTH_RECEIVER_PROGRAM_ID},
         state::SwapStatus,
@@ -55,8 +55,8 @@ const PRICE_UPDATE_V2_LEN: usize = 134;
 fn setup() -> (LiteSVM, Keypair) {
     let mut svm = LiteSVM::new();
 
-    let synthetic_bytes = include_bytes!("../../../target/deploy/synthetic_exposure.so");
-    svm.add_program(synthetic_exposure::ID, synthetic_bytes).unwrap();
+    let put_swap_bytes = include_bytes!("../../../target/deploy/put_swap.so");
+    svm.add_program(put_swap::ID, put_swap_bytes).unwrap();
 
     // Keep mock_pyth loaded so the workspace's second program has an
     // on-chain presence even though we don't CPI into it — it serves as
@@ -94,14 +94,14 @@ fn make_feed_id(seed: u8) -> [u8; 32] {
 fn derive_swap(party_a: &Pubkey, swap_id_seed: &[u8; 8]) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[SWAP_SEED, party_a.as_ref(), swap_id_seed.as_ref()],
-        &synthetic_exposure::ID,
+        &put_swap::ID,
     )
 }
 
 fn derive_asset_vault(swap: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[ASSET_VAULT_SEED, swap.as_ref()],
-        &synthetic_exposure::ID,
+        &put_swap::ID,
     )
     .0
 }
@@ -109,7 +109,7 @@ fn derive_asset_vault(swap: &Pubkey) -> Pubkey {
 fn derive_collateral_vault(swap: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[COLLATERAL_VAULT_SEED, swap.as_ref()],
-        &synthetic_exposure::ID,
+        &put_swap::ID,
     )
     .0
 }
@@ -262,8 +262,8 @@ fn ix_create_swap(
     let price_update = derive_price_account(&feed_id);
 
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::CreateSwap {
+        put_swap::ID,
+        &put_swap::instruction::CreateSwap {
             swap_id_seed,
             amount_asset,
             required_collateral,
@@ -273,7 +273,7 @@ fn ix_create_swap(
             pyth_feed_id: feed_id,
         }
         .data(),
-        synthetic_exposure::accounts::CreateSwapAccountConstraints {
+        put_swap::accounts::CreateSwapAccountConstraints {
             swap,
             asset_mint,
             quote_mint,
@@ -310,9 +310,9 @@ fn ix_fill_swap(
     collateral_amount: u64,
 ) {
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::FillSwap { collateral_amount }.data(),
-        synthetic_exposure::accounts::FillSwapAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::FillSwap { collateral_amount }.data(),
+        put_swap::accounts::FillSwapAccountConstraints {
             swap: fix.swap,
             collateral_vault: fix.collateral_vault,
             party_b_quote_account: party_b_quote,
@@ -333,9 +333,9 @@ fn try_ix_fill_swap(
     collateral_amount: u64,
 ) -> Result<(), String> {
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::FillSwap { collateral_amount }.data(),
-        synthetic_exposure::accounts::FillSwapAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::FillSwap { collateral_amount }.data(),
+        put_swap::accounts::FillSwapAccountConstraints {
             swap: fix.swap,
             collateral_vault: fix.collateral_vault,
             party_b_quote_account: party_b_quote,
@@ -358,9 +358,9 @@ fn ix_add_collateral(
     amount: u64,
 ) {
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::AddCollateral { amount }.data(),
-        synthetic_exposure::accounts::AddCollateralAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::AddCollateral { amount }.data(),
+        put_swap::accounts::AddCollateralAccountConstraints {
             swap: fix.swap,
             collateral_vault: fix.collateral_vault,
             party_b_quote_account: party_b_quote,
@@ -381,9 +381,9 @@ fn ix_cancel_swap(
     party_a_quote: Pubkey,
 ) {
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::CancelSwap {}.data(),
-        synthetic_exposure::accounts::CancelSwapAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::CancelSwap {}.data(),
+        put_swap::accounts::CancelSwapAccountConstraints {
             swap: fix.swap,
             asset_vault: fix.asset_vault,
             collateral_vault: fix.collateral_vault,
@@ -408,9 +408,9 @@ fn try_ix_cancel_swap(
     party_a_quote: Pubkey,
 ) -> Result<(), String> {
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::CancelSwap {}.data(),
-        synthetic_exposure::accounts::CancelSwapAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::CancelSwap {}.data(),
+        put_swap::accounts::CancelSwapAccountConstraints {
             swap: fix.swap,
             asset_vault: fix.asset_vault,
             collateral_vault: fix.collateral_vault,
@@ -440,9 +440,9 @@ fn ix_settle_swap(
 ) {
     let price_update = derive_price_account(&fix.feed_id);
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::SettleSwap {}.data(),
-        synthetic_exposure::accounts::SettleSwapAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::SettleSwap {}.data(),
+        put_swap::accounts::SettleSwapAccountConstraints {
             swap: fix.swap,
             asset_vault: fix.asset_vault,
             collateral_vault: fix.collateral_vault,
@@ -471,9 +471,9 @@ fn try_ix_settle_swap(
 ) -> Result<(), String> {
     let price_update = derive_price_account(&fix.feed_id);
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::SettleSwap {}.data(),
-        synthetic_exposure::accounts::SettleSwapAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::SettleSwap {}.data(),
+        put_swap::accounts::SettleSwapAccountConstraints {
             swap: fix.swap,
             asset_vault: fix.asset_vault,
             collateral_vault: fix.collateral_vault,
@@ -506,9 +506,9 @@ fn ix_liquidate(
 ) {
     let price_update = derive_price_account(&fix.feed_id);
     let ix = Instruction::new_with_bytes(
-        synthetic_exposure::ID,
-        &synthetic_exposure::instruction::Liquidate {}.data(),
-        synthetic_exposure::accounts::LiquidateAccountConstraints {
+        put_swap::ID,
+        &put_swap::instruction::Liquidate {}.data(),
+        put_swap::accounts::LiquidateAccountConstraints {
             swap: fix.swap,
             asset_vault: fix.asset_vault,
             collateral_vault: fix.collateral_vault,

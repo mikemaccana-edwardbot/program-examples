@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-/// Domain errors surfaced by the synthetic-exposure program.
+/// Domain errors surfaced by the put-swap program.
 ///
 /// Each variant carries a human-readable message that Anchor surfaces in
 /// logs and simulation output, so clients can pattern-match on code or on

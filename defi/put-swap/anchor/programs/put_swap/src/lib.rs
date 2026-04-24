@@ -1,4 +1,4 @@
-//! synthetic_exposure — a peer-to-peer cash-settled protective put.
+//! put_swap — a peer-to-peer cash-settled protective put.
 //!
 //! Party A (put buyer, hedged long) locks an SPL asset they already
 //! hold and pre-funds a premium. Party B (put writer, short the put)
@@ -23,10 +23,10 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("ABQ6gmEnvjn8iUKz7PBBL7Mk5paXCmxHxsCPAYZq9SUe");
+declare_id!("6Jrrf5D51rEdUQwfX5XTgyy4L36VMp7QuZp22wn1P5fb");
 
 #[program]
-pub mod synthetic_exposure {
+pub mod put_swap {
     use super::*;
 
     pub fn create_swap(

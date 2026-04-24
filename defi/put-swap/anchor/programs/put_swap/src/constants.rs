@@ -1,4 +1,4 @@
-//! Named constants for the synthetic-exposure protective-put primitive.
+//! Named constants for the put-swap protective-put primitive.
 //!
 //! Every magic number the program and its tests touch lives here with a
 //! short justification. Keep it flat — no feature flags, no config knobs —

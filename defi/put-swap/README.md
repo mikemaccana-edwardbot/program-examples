@@ -1,10 +1,33 @@
-# Synthetic Exposure — Cash-Settled Protective Put
+# Put Swap
 
-A peer-to-peer on-chain primitive that lets one wallet (**party A**)
-hedge the downside of an SPL asset they already hold, while another
-wallet (**party B**) writes that hedge for a fee. At expiry (or earlier,
-via liquidation) the program reads [Pyth](https://pyth.network), computes
-how far the price has fallen, and pays A out of B's collateral.
+A peer-to-peer, on-chain, cash-settled **protective put** between two
+wallets. One wallet (**party A**) hedges the downside of an SPL asset
+they already hold; the other (**party B**) writes that hedge in
+exchange for a premium, earning yield on idle stablecoin collateral.
+At expiry (or earlier, via liquidation) the program reads
+[Pyth](https://pyth.network), computes how far the price has fallen,
+and pays A out of B's collateral. Per-swap isolated vaults, fixed
+expiry, oracle-settled.
+
+### Also known as / use cases
+
+Different audiences reach for different names for this shape of
+contract. They all describe the same primitive implemented here:
+
+- **Downside hedge** — A's primary motivation: protect the value of an
+  existing SPL holding against a drop over a fixed window.
+- **Downside insurance** — colloquial framing used in DeFi and TradFi
+  for the same hedge. Note: this program is **not** a regulated
+  insurance product; it's a bilateral derivatives contract. The word
+  is used here purely as a use-case synonym for "downside hedge".
+- **Protective put** — the precise TradFi name for the strategy A is
+  running: long the underlying + long a cash-settled put on it.
+- **Cash-secured put (writer side)** — what B is doing: collecting a
+  premium up front for the obligation to pay out if the underlying
+  drops, backed by posted quote collateral.
+- **Put swap** — the primitive name used by this example, in the same
+  vein as *perpetual swap*. It's a bilateral swap contract whose
+  payoff profile is that of a put.
 
 ### What it is
 
@@ -334,7 +357,7 @@ compile to avoid linker OOMs.
   lines, layout-stable and documented.
 - **No Node tooling.** No TypeScript tests, no Codama client
   generation, no pnpm lockfile. The generated IDL lives at
-  `target/idl/synthetic_exposure.json` after `anchor build` — clients
+  `target/idl/put_swap.json` after `anchor build` — clients
   that need typed TS bindings can run Codama on that IDL themselves
   (out of scope for this example).
 
@@ -345,7 +368,7 @@ anchor/
 ├── Anchor.toml            # cargo test as the `test` script
 ├── Cargo.toml             # workspace members
 └── programs/
-    ├── synthetic_exposure/
+    ├── put_swap/
     │   ├── src/
     │   │   ├── lib.rs
     │   │   ├── constants.rs
@@ -362,7 +385,7 @@ anchor/
     │   │       ├── settle_swap.rs
     │   │       └── liquidate.rs
     │   └── tests/
-    │       └── test_synthetic_exposure.rs
+    │       └── test_put_swap.rs
     └── mock_pyth/
         └── src/lib.rs     # test-only PriceUpdateV2 writer
 ```

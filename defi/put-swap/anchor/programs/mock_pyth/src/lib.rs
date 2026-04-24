@@ -2,11 +2,11 @@
 //!
 //! Creates (or overwrites) an account owned by this program and fills it
 //! with bytes matching the `pyth_solana_receiver_sdk::PriceUpdateV2` layout,
-//! so `synthetic_exposure` can read the account exactly as it would a real
+//! so `put_swap` can read the account exactly as it would a real
 //! Pyth price update.
 //!
 //! Originally this program existed as a companion to a live-validator test
-//! suite: it owned the mock price accounts, and `synthetic_exposure` was
+//! suite: it owned the mock price accounts, and `put_swap` was
 //! built with a `--features test-oracle` flag that relaxed its Pyth owner
 //! check. That integration path has been retired.
 //!
@@ -14,12 +14,12 @@
 //! directly with owner = Pyth Receiver via `LiteSVM::set_account`, so this
 //! helper program is not needed at test runtime. The source remains as
 //! executable documentation of the 134-byte `PriceUpdateV2` layout — the
-//! same layout `synthetic_exposure::oracle` parses — and still builds as
+//! same layout `put_swap::oracle` parses — and still builds as
 //! part of the workspace.
 
 use anchor_lang::prelude::*;
 
-declare_id!("HNTsMwJPumoJfcbv2jwjCwGQJCZqFoFRS6ap9qXcKT6V");
+declare_id!("8tmS6MDh3CBo82p8FwoeJmXrMawGUca7uMPAkUbKeVPW");
 
 /// Size of a Pyth `PriceUpdateV2` account. Matches
 /// `pyth_solana_receiver_sdk::price_update::PriceUpdateV2::LEN` — copied

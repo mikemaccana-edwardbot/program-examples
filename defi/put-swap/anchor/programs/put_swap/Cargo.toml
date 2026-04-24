@@ -1,12 +1,12 @@
 [package]
-name = "synthetic_exposure"
+name = "put_swap"
 version = "0.1.0"
-description = "Peer-to-peer synthetic perpetual swap primitive settled against Pyth oracles"
+description = "Peer-to-peer cash-settled protective put (put swap) primitive settled against Pyth oracles"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "synthetic_exposure"
+name = "put_swap"
 
 [features]
 default = []
@@ -56,7 +56,7 @@ anchor-spl = "1.0.0"
 # `anchor-lang = "1.0"` (track: https://github.com/pyth-network/pyth-crosschain).
 
 # Dev-dependencies power the LiteSVM integration suite under
-# `tests/test_synthetic_exposure.rs`. Versions match the canonical
+# `tests/test_put_swap.rs`. Versions match the canonical
 # program-examples-litesvm reference (`basics/counter/anchor` and
 # `tokens/transfer-tokens/anchor`) so any future dependency bumps can be
 # propagated workspace-wide in one pass.
@@ -71,7 +71,7 @@ borsh = "1.6.1"
 solana-kite = "0.3.0"
 # Tests load the companion program's `.so` for byte-layout documentation;
 # the `no-entrypoint` feature keeps this dep test-only and avoids pulling
-# mock_pyth's entrypoint into the synthetic_exposure binary.
+# mock_pyth's entrypoint into the put_swap binary.
 mock_pyth = { path = "../mock_pyth", features = ["no-entrypoint"] }
 # `spl-token` is an internal dep of solana-kite's token helpers; the tests
 # also reference `spl_token::ID` when building instruction account metas

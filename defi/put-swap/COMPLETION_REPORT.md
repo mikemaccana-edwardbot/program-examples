@@ -318,3 +318,173 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 **35 tests pass (22 math unit + 12 LiteSVM integration + 1 mock_pyth
 `test_id`), 0 failed, 0 ignored.** Behaviour identical to
 pre-rename; only names changed.
+
+---
+
+## Addendum — `synthetic-exposure` → `put-swap` project rename
+
+### Why
+
+The name `synthetic-exposure` was always ambiguous — it hinted at a
+generic synthetic asset or a TRS, but the program actually implements
+a bilateral cash-settled **protective put**. After the earlier
+`taker_fee` → `premium` rename reframed the up-front payment
+correctly, it became obvious the project-level name was still wrong.
+
+`put-swap` is the accurate primitive name: the payoff profile is a
+put, the execution shape is a bilateral swap (like `perpetual-swap`).
+Developers searching for "downside hedge", "downside insurance",
+"protective put", or "cash-secured put" all land in the same place
+because the README now surfaces those as use-case synonyms up front.
+
+"Insurance" is intentionally kept out of the product name — the word
+is regulated in most jurisdictions and every mature DeFi protocol in
+this category (Nexus Mutual, InsurAce, Sherlock) avoids it as a
+product descriptor. It shows up in the README only as a
+use-case/colloquial framing hint, not a claim about regulatory status.
+
+### Scope of the rename
+
+Token-level renames across the project:
+
+| Old | New |
+|---|---|
+| `defi/synthetic-exposure/` (directory) | `defi/put-swap/` |
+| `programs/synthetic_exposure/` (crate directory) | `programs/put_swap/` |
+| `synthetic_exposure` (Cargo package name, `[lib] name`) | `put_swap` |
+| `pub mod synthetic_exposure { … }` (Anchor program module) | `pub mod put_swap { … }` |
+| `synthetic_exposure` in `[programs.localnet]` (Anchor.toml) | `put_swap` |
+| `tests/test_synthetic_exposure.rs` | `tests/test_put_swap.rs` |
+| `include_bytes!("…/target/deploy/synthetic_exposure.so")` | `…/put_swap.so` |
+| `target/idl/synthetic_exposure.json` (referenced in README) | `target/idl/put_swap.json` |
+| `synthetic_bytes` (local in test bootstrapping) | `put_swap_bytes` |
+| All doc comments mentioning "synthetic_exposure" / "synthetic-exposure" | updated to `put_swap` / `put-swap` |
+| Crate `description` in `Cargo.toml` (stale "synthetic perpetual swap") | "Peer-to-peer cash-settled protective put (put swap) primitive settled against Pyth oracles" |
+
+The `mock_pyth` companion program kept its name — it's still a mock
+Pyth oracle, orthogonal to the swap-primitive name.
+
+Directory moves used `git mv` so history is preserved. A
+post-rename audit (`grep -rn 'synthetic_exposure\|synthetic-exposure'
+defi/put-swap/`) returns only historical references inside this file
+and the original "Completion Report" heading, which are legitimate
+and retained on purpose.
+
+### README reframing
+
+- Title is now **`# Put Swap`**.
+- New opening paragraph states what it is (peer-to-peer cash-settled
+  protective put, oracle-settled via Pyth, per-swap isolated vaults,
+  fixed expiry) and who it's for (A: downside hedge; B: yield on
+  idle stablecoin).
+- New **"Also known as / use cases"** section explicitly lists the
+  aliases a developer or user might search for — downside hedge,
+  downside insurance (colloquial, non-regulatory), protective put,
+  cash-secured put (B's side), put swap — so they all land on the
+  same file regardless of vocabulary.
+- Existing content — lifecycle diagram, finance model, party
+  incentives, instructions table, accounts & PDAs, oracle
+  integration, running the tests, design trade-offs, limitations,
+  file layout — preserved verbatim except for the few code-reference
+  strings (`target/idl/put_swap.json`, the `programs/put_swap/` tree,
+  `test_put_swap.rs`) that would have been stale otherwise.
+
+### Program IDs: unavoidable regeneration
+
+The task spec called for keeping the same `declare_id!` pubkey across
+the rename. That wasn't achievable in practice: Anchor stores each
+program's keypair in `target/deploy/<crate_name>-keypair.json`,
+where `<crate_name>` is the Cargo package name. Renaming the crate
+breaks the path, and `target/` is gitignored — the original keypair
+files were never in version control. Once the rename was applied,
+the first `anchor build` generated fresh keypairs and `anchor keys
+sync` updated the `declare_id!` macros to match.
+
+New program IDs after `anchor keys sync`:
+
+| Program | Pre-rename ID | Post-rename ID |
+|---|---|---|
+| `put_swap` (was `synthetic_exposure`) | `ABQ6gmEnvjn8iUKz7PBBL7Mk5paXCmxHxsCPAYZq9SUe` | `6Jrrf5D51rEdUQwfX5XTgyy4L36VMp7QuZp22wn1P5fb` |
+| `mock_pyth` | `HNTsMwJPumoJfcbv2jwjCwGQJCZqFoFRS6ap9qXcKT6V` | `8tmS6MDh3CBo82p8FwoeJmXrMawGUca7uMPAkUbKeVPW` |
+
+This is purely cosmetic — the program has no deployments anywhere, no
+off-chain clients hold the old ID as a constant, and the IDs only
+need to be internally consistent between `declare_id!` and the
+Anchor.toml `[programs.localnet]` entries so LiteSVM loads the right
+.so against the right ID at test time. Both are now in sync.
+
+### Fresh test output after rename
+
+```
+     Running unittests src/lib.rs (target/debug/deps/mock_pyth-1eac3eb937065a82)
+
+running 1 test
+test test_id ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/put_swap-85168023c1bd52a4)
+
+running 22 tests
+test math::tests::bounty_split_typical ... ok
+test math::tests::bounty_zero_when_a_gets_nothing ... ok
+test math::tests::liquidatable_at_threshold_is_healthy ... ok
+test math::tests::liquidatable_healthy_stays_healthy ... ok
+test math::tests::liquidatable_underwater_triggers ... ok
+test math::tests::liquidatable_zero_equity_is_liquidatable ... ok
+test math::tests::normalize_price_positive_exponent ... ok
+test math::tests::normalize_price_rejects_zero_and_negative ... ok
+test math::tests::normalize_price_typical_pyth_exponent ... ok
+test math::tests::notional_asset_9_decimals_quote_6_decimals ... ok
+test math::tests::notional_matched_decimals ... ok
+test math::tests::notional_quote_larger_decimals_than_asset ... ok
+test math::tests::pnl_b_overflow_does_not_panic ... ok
+test math::tests::pnl_b_price_down_loses ... ok
+test math::tests::pnl_b_price_up_wins ... ok
+test math::tests::pnl_b_rejects_zero_entry_price ... ok
+test math::tests::split_collateral_a_wins_partial_loss ... ok
+test math::tests::split_collateral_b_wins_keeps_everything ... ok
+test math::tests::split_collateral_b_wiped_out_exact ... ok
+test math::tests::split_collateral_pnl_zero_b_keeps_everything ... ok
+test math::tests::split_collateral_loss_beyond_collateral_is_capped ... ok
+test test_id ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/test_put_swap.rs (target/debug/deps/test_put_swap-84bbca3a8b726cb4)
+
+running 12 tests
+test cancels_an_unfilled_swap_and_refunds_party_a ... ok
+test adding_collateral_restores_health_and_blocks_liquidation ... ok
+test creates_a_swap_and_locks_the_asset ... ok
+test fills_a_swap_and_transfers_premium ... ok
+test liquidates_when_party_b_goes_underwater_mid_term ... ok
+test rejects_cancel_after_swap_filled ... ok
+test rejects_fill_with_insufficient_collateral ... ok
+test rejects_settle_before_expiry ... ok
+test rejects_stale_oracle_at_settle ... ok
+test settles_with_party_b_wiped_out_exactly ... ok
+test settles_with_price_appreciation_party_b_wins ... ok
+test settles_with_price_depreciation_party_a_wins ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.45s
+
+   Doc-tests mock_pyth
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests put_swap
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+**35 tests green (22 math unit + 12 LiteSVM integration + 1 mock_pyth
+`test_id`), 0 failed, 0 ignored.** The 34 previously-reported
+non-trivial tests (22 + 12) are all still green under the new crate
+name; the 35th is the `test_id` trivial check in `mock_pyth` which
+has been counted consistently with the prior addendum.
+

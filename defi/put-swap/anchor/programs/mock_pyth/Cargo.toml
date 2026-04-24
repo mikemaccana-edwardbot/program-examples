@@ -20,7 +20,7 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-# Must match the synthetic_exposure program's Anchor version so both can be
+# Must match the put_swap program's Anchor version so both can be
 # built in the same workspace.
 anchor-lang = "1.0.0"
 
