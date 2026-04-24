@@ -1,130 +1,230 @@
-# synthetic-exposure
+# Synthetic Exposure — Two-Sided Total Return Swap
 
-A peer-to-peer synthetic perpetual swap primitive for [Solana](https://solana.com/docs/terminology). Traders deposit a quote token (USDC-style) as collateral and open long or short exposure to any asset tracked by a [Pyth](https://pyth.network/) price feed. No underlying asset is ever held by the program — PnL is settled in the quote token against the oracle.
+A peer-to-peer primitive that lets one wallet (**party A**) lock an SPL
+asset as implicit downside-protection collateral, while another wallet
+(**party B**) posts stablecoin margin to take the corresponding upside
+exposure. At a predetermined expiry (or earlier, via liquidation) the
+program reads Pyth, computes PnL, and redistributes party B's collateral
+between the two parties.
 
-This is a **primitive**, not a full exchange. Funding rates, cross-margin, partial liquidation, fee distribution, and matching engines are deliberately out of scope and can be layered on top.
+- **Party A** — asset-locker / short side. Effectively "sells" exposure
+  to a named counterparty at today's oracle price, and pays a small
+  taker fee for the privilege of being insured against a price fall.
+- **Party B** — collateral-poster / long side. Earns the taker fee at
+  fill and keeps their full collateral if price stays flat or rises.
+  Loses some or all of their collateral to A if price falls.
 
-## Project layout
+Every swap is an isolated pair of vaults; there are no shared pools or
+socialised losses. One program instance can host thousands of concurrent,
+unrelated swaps.
+
+## Finance Model
+
+At `create_swap` the program:
+
+1. Reads Pyth to lock the entry price `P₀`.
+2. Computes the notional value in quote atoms:
+   ```
+   notional = amount_asset × P₀
+   ```
+   with a decimal adjustment so asset and quote mints can have different
+   decimals. See `math::compute_notional_quote`.
+3. Requires that A's chosen `required_collateral` is at least
+   `INITIAL_MARGIN_BPS` of notional (default **30%**).
+4. Caps the taker fee at `MAX_TAKER_FEE_BPS` of notional (default **5%**).
+
+At `settle_swap` (or `liquidate`):
+
+1. Read Pyth to get `P₁`.
+2. Compute party B's PnL in quote atoms:
+   ```
+   pnl_B = notional × (P₁ − P₀) / P₀
+   ```
+3. Split the collateral vault:
+   - **`pnl_B ≥ 0`** (price up — B wins): A gets 0 quote, B gets their
+     full collateral. A keeps the appreciated asset as their "profit".
+   - **`pnl_B < 0`** (price down — A wins): A claims
+     `min(|pnl_B|, collateral_posted)` from the vault; B keeps the
+     remainder.
+4. The locked asset always returns to A in full.
+
+Liquidation is identical except that 5% of A's payout share
+(`LIQUIDATION_BOUNTY_BPS`) goes to the liquidator instead of A. The
+bounty comes out of A's share — not B's — because the liquidator is
+effectively performing A's work by pulling the trigger before expiry.
+
+### Why a 30% / 10% margin schedule?
+
+- **Initial margin (`INITIAL_MARGIN_BPS = 3_000`)**: requires B to have
+  enough collateral to absorb a 30% price fall. Matches the spec's
+  example and is loose enough to attract fills without being reckless.
+- **Maintenance margin (`MAINTENANCE_MARGIN_BPS = 1_000`)**: liquidation
+  triggers when B's equity (`collateral + pnl_B`) drops below 10% of
+  notional. Strictly lower than initial margin so fresh fills never
+  flirt with liquidation.
+
+Both live in `src/constants.rs` with commentary.
+
+### Rounding
+
+Every integer division truncates toward zero. Whenever the truncation
+direction matters (PnL, bounty split), the order of multiplication-then-
+division is chosen so the side *receiving* the payout eats the rounding
+residual. Stranded atoms stay in the collateral vault.
+
+## Lifecycle
 
 ```
-synthetic-exposure/
-  anchor/
-    programs/
-      synthetic_exposure/
-        src/                                            # main program
-        tests/test_synthetic_exposure.rs                # LiteSVM integration suite
-      mock_pyth/                                        # reference PriceUpdateV2 writer (built but unused at test time)
-    Anchor.toml
-    Cargo.toml
+                  ┌───────────────┐
+                  │   Created     │
+                  │ (A locked,    │
+                  │  fee prepaid) │
+                  └──────┬────────┘
+                         │
+           ┌─────────────┼──────────────┐
+           │             │              │
+  cancel_swap(A)    fill_swap(B)        │
+           │             │              │
+           ▼             ▼              │
+   ┌──────────────┐  ┌──────────────┐   │
+   │  Cancelled   │  │    Active    │   │
+   │  (terminal)  │  │ (fee to B,   │   │
+   └──────────────┘  │  collateral  │   │
+                     │  posted)     │   │
+                     └──────┬───────┘   │
+                            │           │
+                 ┌──────────┼───────────┼──────────┐
+                 │          │           │          │
+        add_collateral  liquidate   settle_swap    │
+                 │      (anyone,    (anyone, at    │
+                 │       if under   or after       │
+                 │       maint.)    expiry)        │
+                 ▼          ▼           ▼          │
+                 └───────► ┌──────────────┐        │
+                           │   Settled    │        │
+                           │  (terminal)  │        │
+                           └──────────────┘        │
+                                                   │
+                (or deadline passes → A may call cancel_swap anyway)
 ```
 
-The Anchor project lives under `anchor/`. Commands in this README assume you've `cd`-ed into that directory.
+## Instructions
 
-## Architecture
+| Instruction | Who calls | Allowed state | Effect |
+|---|---|---|---|
+| `create_swap` | A | *(none)* → Created | Locks `amount_asset`, pre-funds `taker_fee` into collateral vault, stores `P₀` |
+| `fill_swap` | B | Created → Active | Transfers collateral to vault, releases fee to B |
+| `add_collateral` | B | Active | Top-up the collateral vault, increases `collateral_posted` |
+| `cancel_swap` | A | Created → Cancelled | Refunds asset and fee to A (before fill, or after deadline passes) |
+| `settle_swap` | anyone | Active → Settled | At/after `expiry_ts`: reads P₁, splits vaults per settlement rules |
+| `liquidate` | anyone | Active → Settled | Pre-expiry if B below maintenance margin: same as settle but pays a 5% bounty |
 
-### Accounts
+## Accounts & PDAs
 
-- **`Market`** — one per asset. PDA: `["market", asset_symbol]`, where `asset_symbol` is 16 bytes, zero-padded.  
-  Holds the quote mint, the vault, the Pyth feed id, leverage and maintenance-margin caps, open-interest totals, and an `is_active` flag.
-- **`Position`** — one per `(market, owner)`. PDA: `["position", market, owner]`.  
-  Holds side (long/short), collateral, notional size, entry price (raw Pyth `i64` + `i32` exponent), open timestamp.
-- **`vault`** — PDA token account at `["vault", market]`. Owned by the market PDA; this program is the only thing that can move tokens out of it.
+- **Swap** — `["swap", party_a, swap_id_seed]`. One account per swap;
+  the 8-byte `swap_id_seed` lets one wallet run many swaps in parallel.
+- **Asset vault** — `["asset_vault", swap]`. Token account owned by the
+  Swap PDA; holds A's locked asset.
+- **Collateral vault** — `["collateral_vault", swap]`. Token account
+  owned by the Swap PDA; holds the pre-funded fee (until fill) and B's
+  collateral.
 
-### Instruction flow
+Both vaults use the Anchor `token_interface` wrappers so each swap can
+independently choose legacy SPL Token or Token-2022 for asset and/or
+quote.
+
+## Oracle Integration
+
+Prices are read from **Pyth Solana Receiver** `PriceUpdateV2` accounts.
+The `oracle.rs` module deserialises the byte layout manually —
+`pyth-solana-receiver-sdk` pins `anchor-lang = "0.32.1"` which conflicts
+with this workspace's `anchor-lang = "1.0.0"`, so depending on the SDK
+directly would force a downgrade. The layout is stable and only 134 bytes;
+the trade-off is worth it.
+
+The oracle reader enforces:
+- Owner = Pyth Receiver program id (`rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ`) — no feature-flag relaxation for tests.
+- Discriminator matches `PriceUpdateV2`.
+- Feed id matches the value stored on the Swap at `create_swap`.
+- `publish_time + STALENESS_MAX_SECONDS (60s) ≥ now`.
+- Price is strictly positive.
+- `confidence ≤ MAX_CONF_BPS (100 bps) × price`.
+
+## Test Oracle
+
+Tests seed a Pyth-owned account directly into LiteSVM via
+`LiteSVM::set_account`, with bytes that match the production
+`PriceUpdateV2` layout. There is no `test-oracle` feature or alternate
+code path — the same parser runs in both prod and tests.
+
+The companion `mock_pyth` program is retained as executable
+documentation of the byte layout; it's loaded into the LiteSVM suite
+but not CPI'd into.
+
+## Running the Tests
+
+Everything is Rust. No Node toolchain, no TypeScript, no Codama, no
+pnpm, no live validator. Tests are LiteSVM integration tests that
+`include_bytes!` the freshly-built program `.so` files.
 
 ```
-initialize_market ──▶ Market + vault ─┐
-                                       ├──▶ open_position ──▶ Position (vault+= collateral)
-                                       │                 │
-                                       │                 ├──▶ add_collateral (vault += amount)
-                                       │                 │
-                                       │                 ├──▶ close_position (vault -= payout, Position closed, rent → owner)
-                                       │                 │
-                                       │                 └──▶ liquidate (vault -= bounty, Position closed, rent → owner, bounty → liquidator)
-                                       │
-                                       └── authority can mark inactive (future extension; is_active flag already in place)
-```
-
-- `open_position(side, collateral, size)` — pulls `collateral` from owner's token account into the vault, verifies `size * 10_000 ≤ collateral * max_leverage_bps`, records the current Pyth price as entry.
-- `add_collateral(amount)` — tops up an existing position without changing size or entry price.
-- `close_position()` — reads the current Pyth price, computes PnL, pays `max(0, collateral + pnl)` back to the owner, closes the `Position` account (rent refunded to the owner).
-- `liquidate()` — anyone may call it. Computes PnL and health; if the position is underwater (equity < maintenance OR equity ≤ 0), pays 5% of remaining equity to the caller as bounty, lets the rest remain in the vault as protocol surplus, closes the `Position` (rent refunded to the position's original owner).
-
-## Finance model
-
-All finance math lives in [`programs/synthetic_exposure/src/math.rs`](./anchor/programs/synthetic_exposure/src/math.rs) and is unit-tested with 19 cases.
-
-### Price normalisation
-
-Pyth reports prices as `i64 price` + `i32 exponent`. The module converts `(price, exponent)` to an internal `u128` fixed-point scale of `PRICE_PRECISION = 1e12`:
-
-```
-normalized = price * 10^(12 + exponent)
-```
-
-This scale fits any Pyth exponent we've seen (typically -8 to -5) inside a `u128`, leaving plenty of headroom when multiplying by `u64`-sized position sizes.
-
-### Unrealised PnL
-
-```
-Long:  pnl = size * (current_price - entry_price) / entry_price
-Short: pnl = size * (entry_price - current_price) / entry_price
-```
-
-All operations use `checked_*` variants; overflow turns into a `MathOverflow` error rather than a panic. Integer division truncates toward zero, which **rounds against the user on gains**: a profitable position that earns a fractional atom rounds it to zero. This is the safer side to err on.
-
-### Health / liquidation
-
-A position is liquidatable when either:
-- `equity ≤ 0`, or
-- `equity < maintenance`, where `maintenance = size * maintenance_margin_bps / 10_000`.
-
-`equity = collateral + pnl`. The comparison is strict: a position exactly at the threshold stays healthy.
-
-The liquidation bounty is **5% of remaining equity** (`LIQUIDATION_BOUNTY_BPS = 500`). The remaining 95% stays in the vault as protocol surplus — this is simpler than burning, avoids the liquidator being incentivised to aggressively underwater positions, and gives the protocol operator discretion over what to do with the surplus later.
-
-### Oracle validation
-
-- **Staleness**: `publish_time + 60s < now` ⇒ `OracleStale` (see `STALENESS_MAX_SECONDS`).
-- **Confidence**: `conf / |price| > 1%` ⇒ `OracleConfidenceTooWide` (see `MAX_CONF_BPS = 100`).
-- **Positive price**: a non-positive reported price is rejected outright.
-- **Feed id match**: the market's stored `pyth_feed_id` must match the bytes inside the price update account.
-- **Owner**: in production builds, the account must be owned by the Pyth Receiver program at `rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ`.
-
-## Pyth: direct byte parsing, no SDK dependency
-
-This repo reads Pyth `PriceUpdateV2` bytes **directly** (see `oracle.rs`) rather than via `pyth-solana-receiver-sdk`. At the time of writing, the Pyth SDK pins `anchor-lang = 0.32.1`, which conflicts with the `anchor-lang = 1.0` used across the rest of the workspace. Parsing the 134-byte fixed layout ourselves is simpler than duplicating two versions of every borsh derive.
-
-The production owner check requires every oracle account to be owned by the Pyth Receiver program (`rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ`). This check applies in all builds — there is no longer a `test-oracle` feature flag that relaxes it. Under LiteSVM the integration tests seed price accounts with the correct owner via `LiteSVM::set_account`, which means production and test code paths read identical account metadata.
-
-A companion `mock_pyth` program remains in the workspace as reference documentation of the 134-byte Pyth layout — its `write_price` instruction encodes the same bytes that `oracle::read_price` parses. It is no longer used by the tests; it simply builds as a second program so readers of the repo can see the forward/reverse byte code side by side.
-
-## Running locally
-
-**Prerequisites**: `anchor` 1.0, `rustc` with the Solana BPF toolchain, and `solana-cli` (for `cargo build-sbf`).
-
-```bash
 cd anchor
-anchor build --ignore-keys --no-idl
-cargo test
+anchor build    # produces target/deploy/*.so
+cargo test      # 22 math unit tests + 12 LiteSVM integration tests
 ```
 
-- `anchor build` compiles both programs to `target/deploy/*.so`. `--ignore-keys` skips the program-id-vs-keypair check (the committed source uses the authored program ids, not whatever local `anchor build` may have stashed in `target/deploy/*-keypair.json`). `--no-idl` skips the IDL generation pass; we don't need the IDL for these tests.
-- `cargo test` then runs:
-  - 19 `math.rs` unit tests
-  - 8 LiteSVM integration tests in `programs/synthetic_exposure/tests/test_synthetic_exposure.rs`, covering market init, long/short opens and closes, add-collateral, liquidation, over-leverage rejection, and stale-oracle rejection.
+Anchor.toml's `[scripts]` maps `anchor test` to `cargo test`, so
+`anchor test` runs `anchor build` followed by the Rust test suite.
 
-The integration tests load both `.so` files into a LiteSVM instance via `include_bytes!`, seed oracle accounts directly (no live validator needed), and run end-to-end in under two seconds.
+On machines with limited RAM set `CARGO_BUILD_JOBS=1` during the first
+compile to avoid linker OOMs.
 
-## Known limitations / deliberate scope
+## Design Trade-offs
 
-- **No funding rate.** A funding-rate mechanism for mean-reverting long/short imbalance is a layer above this primitive, not part of it. Each position settles purely on spot-vs-entry PnL.
-- **No partial liquidation.** Liquidations close the whole position; a partial variant that keeps the position alive up to health ≥ 1 is a reasonable extension.
-- **No cross-margin.** Each position is independent — the owner can't use profits in one position to support another.
-- **No fee distribution / protocol surplus payout.** Surplus from liquidations simply accumulates in the vault. A future upgrade could route it to a treasury or LP pool.
-- **No market-maker incentives** — this is a 1-to-1 trader-vs-vault primitive.
-- **Vault capitalisation is external.** Trader profits are paid out of the vault, which must therefore be seeded with protocol-provided capital at market creation. The example tests fund each vault with 10 000 quote-token units via `mintTo` after `initialize_market`. A production deployment would typically capitalise the vault from a treasury.
+- **No upside payout to A from the collateral vault** — A's upside is
+  implicit in the appreciated asset, which returns to A intact. This is
+  the clean, balanced interpretation of the spec's "A gets asset back
+  + (B's collateral − pnl); B gets their collateral + pnl" (the literal
+  reading cannot balance because it requires paying out
+  `2 × B's collateral` from a vault that only contains
+  `B's collateral`). Party A effectively holds a protective put struck
+  at `P₀`; B sells that put and earns the taker fee as premium.
+- **Per-swap vaults, not pooled** — no socialised bad debt across
+  swaps. If P₁ crashes far below P₀ and `|pnl_B|` exceeds
+  `collateral_posted`, A receives at most `collateral_posted`; the
+  uncovered portion is the cost of an insufficient initial margin.
+- **Liquidation bounty out of A's share** — A is the beneficiary of
+  the protective put and the liquidator is doing A's work, so it's
+  A's to pay.
+- **Entry price stored as raw Pyth `(price, exponent)` pair** — lets
+  settlement reproduce the exact normalisation used at create time
+  even if the Pyth exponent shifts between fill and expiry.
 
-## Licence
+## File Layout
 
-MIT.
+```
+anchor/
+├── Anchor.toml            # cargo test as the `test` script
+├── Cargo.toml             # workspace members
+└── programs/
+    ├── synthetic_exposure/
+    │   ├── src/
+    │   │   ├── lib.rs
+    │   │   ├── constants.rs
+    │   │   ├── errors.rs
+    │   │   ├── math.rs           # + unit tests
+    │   │   ├── oracle.rs         # Pyth PriceUpdateV2 parser
+    │   │   ├── state.rs          # Swap account + SwapStatus enum
+    │   │   └── instructions/
+    │   │       ├── mod.rs
+    │   │       ├── create_swap.rs
+    │   │       ├── fill_swap.rs
+    │   │       ├── add_collateral.rs
+    │   │       ├── cancel_swap.rs
+    │   │       ├── settle_swap.rs
+    │   │       └── liquidate.rs
+    │   └── tests/
+    │       └── test_synthetic_exposure.rs
+    └── mock_pyth/
+        └── src/lib.rs     # test-only PriceUpdateV2 writer
+```

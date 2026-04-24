@@ -7,23 +7,20 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-synthetic_exposure = "5dwJTVySHJFvvfzstKP6eoJT3P5MXjHcMmHKfdWkUhRH"
-mock_pyth = "6Pxay9ELFPU1Wt2dimLE1ut95dZhQJM5CC73jZ9EXMk8"
+mock_pyth = "HNTsMwJPumoJfcbv2jwjCwGQJCZqFoFRS6ap9qXcKT6V"
+synthetic_exposure = "ABQ6gmEnvjn8iUKz7PBBL7Mk5paXCmxHxsCPAYZq9SUe"
 
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-# Tests are Rust integration tests that run against a LiteSVM instance with
-# the freshly-built .so files baked in via `include_bytes!`. This matches
-# the program-examples-litesvm canonical pattern (see
-# `basics/counter/anchor` and `tokens/transfer-tokens/anchor`). We no longer
-# need a live validator, Codama client generation, or a TypeScript
-# toolchain — the test itself is a plain `cargo test` invocation.
-#
-# Run order: `anchor build` first (to produce target/deploy/*.so), then
-# `cargo test`. `anchor test` does both in sequence.
+# Tests are Rust integration tests that run against a LiteSVM instance
+# with the freshly-built .so files baked in via `include_bytes!`. This
+# matches the program-examples-litesvm canonical pattern. No live
+# validator, no Codama client generation, no TypeScript toolchain — the
+# test command is a plain `cargo test` invocation. `anchor test` runs
+# `anchor build` first, producing `target/deploy/*.so`, then this script.
 test = "cargo test"
 
 [hooks]

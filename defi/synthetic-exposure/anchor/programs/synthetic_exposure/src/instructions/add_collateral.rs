@@ -1,73 +1,83 @@
+//! `add_collateral` — party B tops up the collateral vault mid-term to
+//! avoid liquidation.
+//!
+//! Only callable while the swap is `Active` and only by the party B who
+//! filled it. The top-up increases `collateral_posted` atom-for-atom.
+
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 
-use crate::constants::POSITION_SEED;
+use crate::constants::{COLLATERAL_VAULT_SEED, SWAP_SEED};
 use crate::errors::ErrorCode;
-use crate::state::{Market, Position};
+use crate::state::{Swap, SwapStatus};
 
 pub fn add_collateral(
     context: Context<AddCollateralAccountConstraints>,
     amount: u64,
 ) -> Result<()> {
-    require!(amount > 0, ErrorCode::ZeroCollateral);
-    require!(context.accounts.market.is_active, ErrorCode::MarketInactive);
+    require!(amount > 0, ErrorCode::ZeroAmount);
+    let swap = &context.accounts.swap;
+    require!(swap.status == SwapStatus::Active, ErrorCode::SwapNotActive);
+    let filled_by = swap.party_b.ok_or_else(|| error!(ErrorCode::SwapNotActive))?;
+    require_keys_eq!(
+        filled_by,
+        context.accounts.party_b.key(),
+        ErrorCode::Unauthorized
+    );
 
     transfer_checked(
         CpiContext::new(
             context.accounts.token_program.key(),
             TransferChecked {
-                from: context.accounts.owner_token_account.to_account_info(),
+                from: context.accounts.party_b_quote_account.to_account_info(),
                 mint: context.accounts.quote_mint.to_account_info(),
-                to: context.accounts.vault.to_account_info(),
-                authority: context.accounts.owner.to_account_info(),
+                to: context.accounts.collateral_vault.to_account_info(),
+                authority: context.accounts.party_b.to_account_info(),
             },
         ),
         amount,
         context.accounts.quote_mint.decimals,
     )?;
 
-    let position = &mut context.accounts.position;
-    position.collateral = position
-        .collateral
+    let swap = &mut context.accounts.swap;
+    swap.collateral_posted = swap
+        .collateral_posted
         .checked_add(amount)
         .ok_or_else(|| error!(ErrorCode::MathOverflow))?;
-
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct AddCollateralAccountConstraints<'info> {
-    pub market: Box<Account<'info, Market>>,
+    #[account(
+        mut,
+        seeds = [SWAP_SEED, swap.party_a.as_ref(), swap.swap_id_seed.as_ref()],
+        bump = swap.bump,
+    )]
+    pub swap: Box<Account<'info, Swap>>,
 
     #[account(
         mut,
-        seeds = [POSITION_SEED, market.key().as_ref(), owner.key().as_ref()],
-        bump = position.bump,
-        has_one = market,
-        has_one = owner,
+        seeds = [COLLATERAL_VAULT_SEED, swap.key().as_ref()],
+        bump = swap.collateral_vault_bump,
+        token::mint = quote_mint,
     )]
-    pub position: Box<Account<'info, Position>>,
-
-    #[account(
-        mut,
-        address = market.vault,
-    )]
-    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
         token::mint = quote_mint,
-        token::authority = owner,
+        token::authority = party_b,
     )]
-    pub owner_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub party_b_quote_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    #[account(address = market.quote_mint)]
+    #[account(address = swap.quote_mint)]
     pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub party_b: Signer<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }

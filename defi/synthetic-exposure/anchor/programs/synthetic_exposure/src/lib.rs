@@ -1,11 +1,13 @@
-//! synthetic_exposure — peer-to-peer synthetic perpetual swap.
+//! synthetic_exposure — two-sided peer-to-peer Total Return Swap (TRS).
 //!
-//! Users deposit quote-token collateral (USDC-style) and open long/short
-//! synthetic exposure to an asset tracked by a Pyth price feed. The program
-//! never holds the underlying asset; all PnL is settled in the quote token
-//! against the oracle.
+//! Party A locks an asset as collateral for a SHORT position. Party B
+//! posts quote-token margin for the matching LONG position. At expiry
+//! (or on liquidation) the program reads Pyth, computes B's PnL, and
+//! redistributes B's collateral between the two parties. The asset
+//! always returns to A intact.
 //!
-//! See `README.md` for the accounts, flows, and finance model.
+//! See `README.md` for the lifecycle diagram, accounts layout and the
+//! exact settlement math.
 
 use anchor_lang::prelude::*;
 
@@ -17,41 +19,40 @@ pub mod oracle;
 pub mod state;
 
 use instructions::*;
-use state::Side;
 
-declare_id!("5dwJTVySHJFvvfzstKP6eoJT3P5MXjHcMmHKfdWkUhRH");
+declare_id!("ABQ6gmEnvjn8iUKz7PBBL7Mk5paXCmxHxsCPAYZq9SUe");
 
 #[program]
 pub mod synthetic_exposure {
     use super::*;
 
-    pub fn initialize_market(
-        context: Context<InitializeMarketAccountConstraints>,
-        asset_symbol: [u8; constants::ASSET_SYMBOL_LEN],
+    pub fn create_swap(
+        context: Context<CreateSwapAccountConstraints>,
+        swap_id_seed: [u8; 8],
+        amount_asset: u64,
+        required_collateral: u64,
+        taker_fee: u64,
+        expiry_ts: i64,
+        fill_deadline_ts: i64,
         pyth_feed_id: [u8; 32],
-        maintenance_margin_bps: u16,
-        max_leverage_bps: u32,
     ) -> Result<()> {
-        instructions::initialize_market(
+        instructions::create_swap(
             context,
-            asset_symbol,
+            swap_id_seed,
+            amount_asset,
+            required_collateral,
+            taker_fee,
+            expiry_ts,
+            fill_deadline_ts,
             pyth_feed_id,
-            maintenance_margin_bps,
-            max_leverage_bps,
         )
     }
 
-    pub fn open_position(
-        context: Context<OpenPositionAccountConstraints>,
-        side: Side,
-        collateral: u64,
-        size: u64,
+    pub fn fill_swap(
+        context: Context<FillSwapAccountConstraints>,
+        collateral_amount: u64,
     ) -> Result<()> {
-        instructions::open_position(context, side, collateral, size)
-    }
-
-    pub fn close_position(context: Context<ClosePositionAccountConstraints>) -> Result<()> {
-        instructions::close_position(context)
+        instructions::fill_swap(context, collateral_amount)
     }
 
     pub fn add_collateral(
@@ -59,6 +60,14 @@ pub mod synthetic_exposure {
         amount: u64,
     ) -> Result<()> {
         instructions::add_collateral(context, amount)
+    }
+
+    pub fn cancel_swap(context: Context<CancelSwapAccountConstraints>) -> Result<()> {
+        instructions::cancel_swap(context)
+    }
+
+    pub fn settle_swap(context: Context<SettleSwapAccountConstraints>) -> Result<()> {
+        instructions::settle_swap(context)
     }
 
     pub fn liquidate(context: Context<LiquidateAccountConstraints>) -> Result<()> {

@@ -19,7 +19,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("6Pxay9ELFPU1Wt2dimLE1ut95dZhQJM5CC73jZ9EXMk8");
+declare_id!("HNTsMwJPumoJfcbv2jwjCwGQJCZqFoFRS6ap9qXcKT6V");
 
 /// Size of a Pyth `PriceUpdateV2` account. Matches
 /// `pyth_solana_receiver_sdk::price_update::PriceUpdateV2::LEN` — copied
