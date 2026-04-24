@@ -1,0 +1,84 @@
+[package]
+name = "synthetic_exposure"
+version = "0.1.0"
+description = "Peer-to-peer synthetic perpetual swap primitive settled against Pyth oracles"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "synthetic_exposure"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+# `anchor-spl/idl-build` is required so the generated IDL carries the
+# Token-Interface account structs (Mint, TokenAccount) that this program
+# uses via `InterfaceAccount`. Without it, IDL generation fails.
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+# NOTE: a previous `test-oracle` feature used to relax the Pyth owner check
+# for tests. It was removed when integration tests moved from a live
+# validator + companion `mock_pyth` program to LiteSVM. Under LiteSVM the
+# tests now write the exact `PriceUpdateV2` byte layout into an account
+# whose owner is set to the real Pyth Receiver program id via
+# `LiteSVM::set_account`, so production and test code paths read identical
+# account metadata. A feature flag that changed program behaviour between
+# tests and prod was a code smell we happily got rid of.
+
+
+[dependencies]
+# Pinned to 1.0.0 because that's the current stable Anchor release and matches
+# the program-examples migration target.
+anchor-lang = "1.0.0"
+# Provides the Token-Interface wrappers (`Mint`, `TokenAccount`,
+# `TransferChecked`) that let this program serve both legacy Token and
+# Token-2022 vaults with the same code path. Version pinned to match
+# anchor-lang above.
+anchor-spl = "1.0.0"
+# NOTE: we deliberately do NOT depend on `pyth-solana-receiver-sdk`.
+#
+# At the time of writing, `pyth-solana-receiver-sdk = "1.1.0"` pins
+# `anchor-lang = "0.32.1"`, which conflicts with the `anchor-lang = "1.0.0"`
+# used by the rest of the workspace. Cargo ends up with two versions of
+# `anchor-lang` (and therefore two versions of `borsh`), which makes the
+# Pyth `PriceUpdateV2` macro-derived `BorshSerialize`/`BorshDeserialize`
+# impls incompatible with our consumers and the crate fails to compile.
+#
+# Rather than downgrade the whole program to Anchor 0.32.1, we read the
+# Pyth price-update byte layout directly in `oracle.rs` — the layout is
+# stable, documented, and short. This also keeps the compiled binary
+# smaller. Revisit when Pyth publishes a version that targets
+# `anchor-lang = "1.0"` (track: https://github.com/pyth-network/pyth-crosschain).
+
+# Dev-dependencies power the LiteSVM integration suite under
+# `tests/test_synthetic_exposure.rs`. Versions match the canonical
+# program-examples-litesvm reference (`basics/counter/anchor` and
+# `tokens/transfer-tokens/anchor`) so any future dependency bumps can be
+# propagated workspace-wide in one pass.
+[dev-dependencies]
+litesvm = "0.11.0"
+solana-signer = "3.0.0"
+solana-keypair = "3.0.1"
+# Needed to construct `Account` structs when seeding mock Pyth price
+# accounts via `LiteSVM::set_account`.
+solana-account = "3.0.0"
+borsh = "1.6.1"
+solana-kite = "0.3.0"
+# Tests load the companion program's `.so` for byte-layout documentation;
+# the `no-entrypoint` feature keeps this dep test-only and avoids pulling
+# mock_pyth's entrypoint into the synthetic_exposure binary.
+mock_pyth = { path = "../mock_pyth", features = ["no-entrypoint"] }
+# `spl-token` is an internal dep of solana-kite's token helpers; the tests
+# also reference `spl_token::ID` when building instruction account metas
+# for InterfaceAccount-based token-program inputs, so we pull it in
+# explicitly. Version matches what solana-kite 0.3.0 resolves to.
+spl-token = "9.0.0"
+
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -1,0 +1,28 @@
+[package]
+name = "mock_pyth"
+version = "0.1.0"
+description = "Test-only oracle seeder — writes fake Pyth PriceUpdateV2 bytes for local integration testing"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "mock_pyth"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+# Must match the synthetic_exposure program's Anchor version so both can be
+# built in the same workspace.
+anchor-lang = "1.0.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

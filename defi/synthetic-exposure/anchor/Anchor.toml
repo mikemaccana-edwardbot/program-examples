@@ -1,0 +1,29 @@
+[toolchain]
+anchor_version = "1.0.0"
+solana_version = "3.1.8"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+synthetic_exposure = "5dwJTVySHJFvvfzstKP6eoJT3P5MXjHcMmHKfdWkUhRH"
+mock_pyth = "6Pxay9ELFPU1Wt2dimLE1ut95dZhQJM5CC73jZ9EXMk8"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+# Tests are Rust integration tests that run against a LiteSVM instance with
+# the freshly-built .so files baked in via `include_bytes!`. This matches
+# the program-examples-litesvm canonical pattern (see
+# `basics/counter/anchor` and `tokens/transfer-tokens/anchor`). We no longer
+# need a live validator, Codama client generation, or a TypeScript
+# toolchain — the test itself is a plain `cargo test` invocation.
+#
+# Run order: `anchor build` first (to produce target/deploy/*.so), then
+# `cargo test`. `anchor test` does both in sequence.
+test = "cargo test"
+
+[hooks]
