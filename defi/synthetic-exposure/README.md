@@ -136,6 +136,99 @@ residual. Stranded atoms stay in the collateral vault.
                 (or deadline passes → A may call cancel_swap anyway)
 ```
 
+## Why Participate? What Each Side Gets
+
+### Party A — Put Buyer (holds the asset)
+
+**What A gets:**
+- **Downside protection.** If the asset price falls between create and
+  expiry, A is paid out of B's collateral for the drop (up to the amount
+  of collateral posted). A's total return ≈ (asset value at P₁) + (B's
+  collateral contribution) ≈ A's portfolio value at P₀ on the downside.
+- **Asset appreciation, unaltered.** If price rises, A still holds the
+  asset — they get the full upside. The program doesn't touch A's asset.
+- **Capital efficiency.** A doesn't sell their position, doesn't incur
+  tax events, doesn't lose staking/yield on the underlying (assuming
+  they'd be earning it elsewhere — the locked asset in our vault doesn't
+  earn, which is one cost).
+
+**What A pays:**
+- **Premium** (upfront, to B). The cost of the protection.
+- **Opportunity cost** of the locked asset — it sits idle in the vault
+  earning nothing until expiry.
+- **Expiry risk** — if A needs to exit early for non-liquidation reasons,
+  they can't (no early-close instruction).
+
+**A's position is equivalent to**: buying a cash-settled put option on
+their holding, with the premium paid upfront, strike = P₀, cash
+settlement at expiry.
+
+**Real-world reasons to do this**: A holds an asset long-term (taxable
+lot, staking rewards, narrative conviction) but wants to hedge a specific
+window of downside risk (earnings event, macro event, cliff vest,
+roadmap milestone).
+
+### Party B — Put Writer (posts collateral)
+
+**What B gets:**
+- **Premium, earned upfront** (at fill time). Pure income if the asset
+  stays at or above P₀ through expiry.
+- **No asset exposure required.** B doesn't need to own the asset — just
+  stablecoin to post as collateral.
+- **Defined max loss.** B can lose at most their posted collateral. The
+  30% initial margin means B is writing a put with a 30% max loss
+  ceiling. No unlimited downside (unlike an uncovered short).
+
+**What B pays / risks:**
+- **Collateral is locked** until expiry (no yield while locked).
+- **Downside losses** if price falls. Losses come out of collateral
+  pro-rata to the percentage drop. If asset drops 30%+, B loses their
+  full stake.
+- **Liquidation risk.** If price falls past maintenance margin mid-term,
+  anyone can call `liquidate` and B gets settled early at the worse
+  price (no chance to recover if price bounces back).
+- **Opportunity cost** on the stablecoin collateral.
+
+**B's position is equivalent to**: writing a cash-secured put — classic
+income strategy in options markets. Get paid the premium, obligated to
+"buy at P₀" (effectively) if price falls.
+
+**Real-world reasons to do this**:
+- B is bullish on the asset but doesn't want to buy it at P₀. They're
+  willing to buy it *if* it drops. Premium compensates them for that
+  commitment.
+- B has idle stablecoins and wants yield from a defined-risk strategy.
+- B wants to express "I don't think this asset will crash below 30% of
+  P₀ in the next X days" as a trade.
+
+### Why would A and B match?
+
+They have **opposite views on near-term downside**:
+
+- A is worried about downside → willing to pay to offload it.
+- B thinks downside is unlikely → willing to take the risk for premium.
+
+In efficient markets the premium will price that disagreement — volatile
+assets or uncertain windows → higher premium, stable assets → lower
+premium.
+
+### What A does NOT get (worth being explicit)
+
+- **No payout on asset appreciation from the program.** If A also wanted
+  to be fully hedged (locked in P₀ regardless of direction), this isn't
+  the instrument — that's a total return swap where A would also give
+  up upside. This program is a put, not a TRS.
+- **No early exit.** No close-before-expiry instruction. If A changes
+  their mind mid-swap, they're stuck until `settle_swap` becomes
+  callable at `expiry_ts`, unless B gets liquidated first.
+
+### What B does NOT get
+
+- **No upside from the asset.** Even if price 10x's, B still only gets
+  the premium. B is capped at the premium earned.
+- **No continuous fee / funding.** Unlike a perpetual, there's no
+  recurring payment between sides — premium is one-shot at fill.
+
 ## Instructions
 
 | Instruction | Who calls | Allowed state | Effect |
