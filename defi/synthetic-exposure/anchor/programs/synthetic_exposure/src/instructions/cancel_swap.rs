@@ -1,5 +1,5 @@
 //! `cancel_swap` — party A reclaims their locked asset and pre-funded
-//! taker fee from an unfilled swap.
+//! premium from an unfilled swap.
 //!
 //! Allowed states:
 //! - `Created` at any time before `fill_deadline_ts` — A may cancel a
@@ -32,7 +32,7 @@ pub fn cancel_swap(context: Context<CancelSwapAccountConstraints>) -> Result<()>
     );
 
     let asset_amount = swap.amount_asset;
-    let taker_fee = swap.taker_fee;
+    let premium = swap.premium;
 
     // Build PDA signer seeds once and reuse for both transfers.
     let party_a_key = swap.party_a;
@@ -62,8 +62,8 @@ pub fn cancel_swap(context: Context<CancelSwapAccountConstraints>) -> Result<()>
         context.accounts.asset_mint.decimals,
     )?;
 
-    // Return the pre-funded taker fee to A (if any).
-    if taker_fee > 0 {
+    // Return the pre-funded premium to A (if any).
+    if premium > 0 {
         transfer_checked(
             CpiContext::new_with_signer(
                 context.accounts.quote_token_program.key(),
@@ -75,7 +75,7 @@ pub fn cancel_swap(context: Context<CancelSwapAccountConstraints>) -> Result<()>
                 },
                 signer,
             ),
-            taker_fee,
+            premium,
             context.accounts.quote_mint.decimals,
         )?;
     }

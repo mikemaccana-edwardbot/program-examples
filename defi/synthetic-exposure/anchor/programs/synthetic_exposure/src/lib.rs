@@ -1,10 +1,13 @@
-//! synthetic_exposure — two-sided peer-to-peer Total Return Swap (TRS).
+//! synthetic_exposure — a peer-to-peer cash-settled protective put.
 //!
-//! Party A locks an asset as collateral for a SHORT position. Party B
-//! posts quote-token margin for the matching LONG position. At expiry
-//! (or on liquidation) the program reads Pyth, computes B's PnL, and
-//! redistributes B's collateral between the two parties. The asset
-//! always returns to A intact.
+//! Party A (put buyer, hedged long) locks an SPL asset they already
+//! hold and pre-funds a premium. Party B (put writer, short the put)
+//! posts quote-token collateral to fund A's downside claim, receives
+//! the premium at fill, and keeps whatever collateral isn't paid to A
+//! at settlement. The locked asset always returns to A intact.
+//!
+//! Not a symmetric two-sided TRS: A only receives a quote payout on the
+//! downside — on the upside A's compensation is the appreciated asset.
 //!
 //! See `README.md` for the lifecycle diagram, accounts layout and the
 //! exact settlement math.
@@ -31,7 +34,7 @@ pub mod synthetic_exposure {
         swap_id_seed: [u8; 8],
         amount_asset: u64,
         required_collateral: u64,
-        taker_fee: u64,
+        premium: u64,
         expiry_ts: i64,
         fill_deadline_ts: i64,
         pyth_feed_id: [u8; 32],
@@ -41,7 +44,7 @@ pub mod synthetic_exposure {
             swap_id_seed,
             amount_asset,
             required_collateral,
-            taker_fee,
+            premium,
             expiry_ts,
             fill_deadline_ts,
             pyth_feed_id,

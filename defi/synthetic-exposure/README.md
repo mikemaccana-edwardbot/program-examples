@@ -1,22 +1,43 @@
-# Synthetic Exposure — Two-Sided Total Return Swap
+# Synthetic Exposure — Cash-Settled Protective Put
 
-A peer-to-peer primitive that lets one wallet (**party A**) lock an SPL
-asset as implicit downside-protection collateral, while another wallet
-(**party B**) posts stablecoin margin to take the corresponding upside
-exposure. At a predetermined expiry (or earlier, via liquidation) the
-program reads Pyth, computes PnL, and redistributes party B's collateral
-between the two parties.
+A peer-to-peer on-chain primitive that lets one wallet (**party A**)
+hedge the downside of an SPL asset they already hold, while another
+wallet (**party B**) writes that hedge for a fee. At expiry (or earlier,
+via liquidation) the program reads [Pyth](https://pyth.network), computes
+how far the price has fallen, and pays A out of B's collateral.
 
-- **Party A** — asset-locker / short side. Effectively "sells" exposure
-  to a named counterparty at today's oracle price, and pays a small
-  taker fee for the privilege of being insured against a price fall.
-- **Party B** — collateral-poster / long side. Earns the taker fee at
-  fill and keeps their full collateral if price stays flat or rises.
-  Loses some or all of their collateral to A if price falls.
+### What it is
+
+A cash-settled **protective put** on a Pyth-priced asset, executed as a
+bilateral put swap:
+
+- **Party A** — **put buyer** (hedged long). Already owns the asset,
+  wants insurance against a price fall. Locks the asset to prove they
+  hold it and pre-funds a **premium** which goes to B at fill.
+- **Party B** — **put writer** (short the put). Posts quote-token
+  (e.g. USDC) collateral that funds A's downside claim, earns the
+  premium at fill, keeps whatever collateral isn't paid out to A at
+  settlement.
+
+At settlement, if the price has fallen, A claims
+`min(|pnl|, collateral_posted)` in quote tokens from B's collateral
+vault. If the price is flat or up, A gets nothing from the collateral
+vault — A's upside is implicit in the appreciated asset, which is
+always returned to A intact.
 
 Every swap is an isolated pair of vaults; there are no shared pools or
 socialised losses. One program instance can host thousands of concurrent,
 unrelated swaps.
+
+### What it isn't
+
+**Not** a symmetric two-sided Total Return Swap. A only receives a
+quote payout on the *downside*. On the upside A's compensation is the
+asset itself, which has appreciated. That's structurally what a
+protective put is — put buyers don't get more cash when their hedged
+asset rallies, they just don't need the hedge. Don't use this as a
+template for a truly synthetic long/short pair where both sides settle
+in quote; that would require A to also post quote collateral.
 
 ## Finance Model
 
@@ -31,19 +52,25 @@ At `create_swap` the program:
    decimals. See `math::compute_notional_quote`.
 3. Requires that A's chosen `required_collateral` is at least
    `INITIAL_MARGIN_BPS` of notional (default **30%**).
-4. Caps the taker fee at `MAX_TAKER_FEE_BPS` of notional (default **5%**).
+4. Caps the premium at `MAX_PREMIUM_BPS` of notional (default **5%**).
+5. Pre-funds the premium into the collateral vault. It stays there
+   until fill (when it goes to B) or cancel (when it returns to A).
 
 At `settle_swap` (or `liquidate`):
 
 1. Read Pyth to get `P₁`.
-2. Compute party B's PnL in quote atoms:
+2. Compute the put's payoff, expressed as B's PnL in quote atoms:
    ```
    pnl_B = notional × (P₁ − P₀) / P₀
    ```
+   `pnl_B ≥ 0` ⇔ put is out of the money (price flat or up).
+   `pnl_B < 0` ⇔ put is in the money (price down); the put writer B
+   owes the put buyer A.
 3. Split the collateral vault:
-   - **`pnl_B ≥ 0`** (price up — B wins): A gets 0 quote, B gets their
-     full collateral. A keeps the appreciated asset as their "profit".
-   - **`pnl_B < 0`** (price down — A wins): A claims
+   - **`pnl_B ≥ 0`** (put expires worthless — B keeps the premium):
+     A gets 0 quote; B gets their full collateral back. A keeps the
+     appreciated asset.
+   - **`pnl_B < 0`** (put is exercised against B): A claims
      `min(|pnl_B|, collateral_posted)` from the vault; B keeps the
      remainder.
 4. The locked asset always returns to A in full.
@@ -55,9 +82,9 @@ effectively performing A's work by pulling the trigger before expiry.
 
 ### Why a 30% / 10% margin schedule?
 
-- **Initial margin (`INITIAL_MARGIN_BPS = 3_000`)**: requires B to have
-  enough collateral to absorb a 30% price fall. Matches the spec's
-  example and is loose enough to attract fills without being reckless.
+- **Initial margin (`INITIAL_MARGIN_BPS = 3_000`)**: requires B to post
+  enough collateral to cover a 30% fall in the asset price. Loose
+  enough to attract writers without being reckless.
 - **Maintenance margin (`MAINTENANCE_MARGIN_BPS = 1_000`)**: liquidation
   triggers when B's equity (`collateral + pnl_B`) drops below 10% of
   notional. Strictly lower than initial margin so fresh fills never
@@ -75,25 +102,26 @@ residual. Stranded atoms stay in the collateral vault.
 ## Lifecycle
 
 ```
-                  ┌───────────────┐
-                  │   Created     │
-                  │ (A locked,    │
-                  │  fee prepaid) │
-                  └──────┬────────┘
+                  ┌────────────────┐
+                  │    Created     │
+                  │ (A locked,     │
+                  │  premium       │
+                  │  prepaid)      │
+                  └──────┬─────────┘
                          │
            ┌─────────────┼──────────────┐
            │             │              │
   cancel_swap(A)    fill_swap(B)        │
            │             │              │
            ▼             ▼              │
-   ┌──────────────┐  ┌──────────────┐   │
-   │  Cancelled   │  │    Active    │   │
-   │  (terminal)  │  │ (fee to B,   │   │
-   └──────────────┘  │  collateral  │   │
-                     │  posted)     │   │
-                     └──────┬───────┘   │
-                            │           │
-                 ┌──────────┼───────────┼──────────┐
+   ┌──────────────┐  ┌──────────────────┐
+   │  Cancelled   │  │      Active      │
+   │  (terminal)  │  │ (premium paid to │
+   └──────────────┘  │  B, collateral   │
+                     │  posted)         │
+                     └──────┬───────────┘
+                            │
+                 ┌──────────┼───────────┬──────────┐
                  │          │           │          │
         add_collateral  liquidate   settle_swap    │
                  │      (anyone,    (anyone, at    │
@@ -112,10 +140,10 @@ residual. Stranded atoms stay in the collateral vault.
 
 | Instruction | Who calls | Allowed state | Effect |
 |---|---|---|---|
-| `create_swap` | A | *(none)* → Created | Locks `amount_asset`, pre-funds `taker_fee` into collateral vault, stores `P₀` |
-| `fill_swap` | B | Created → Active | Transfers collateral to vault, releases fee to B |
+| `create_swap` | A | *(none)* → Created | Locks `amount_asset`, pre-funds `premium` into collateral vault, stores `P₀` |
+| `fill_swap` | B | Created → Active | Transfers collateral to vault, releases premium to B |
 | `add_collateral` | B | Active | Top-up the collateral vault, increases `collateral_posted` |
-| `cancel_swap` | A | Created → Cancelled | Refunds asset and fee to A (before fill, or after deadline passes) |
+| `cancel_swap` | A | Created → Cancelled | Refunds asset and premium to A (before fill, or after deadline passes) |
 | `settle_swap` | anyone | Active → Settled | At/after `expiry_ts`: reads P₁, splits vaults per settlement rules |
 | `liquidate` | anyone | Active → Settled | Pre-expiry if B below maintenance margin: same as settle but pays a 5% bounty |
 
@@ -126,12 +154,14 @@ residual. Stranded atoms stay in the collateral vault.
 - **Asset vault** — `["asset_vault", swap]`. Token account owned by the
   Swap PDA; holds A's locked asset.
 - **Collateral vault** — `["collateral_vault", swap]`. Token account
-  owned by the Swap PDA; holds the pre-funded fee (until fill) and B's
-  collateral.
+  owned by the Swap PDA; holds the pre-funded premium (until fill) and
+  B's collateral.
 
 Both vaults use the Anchor `token_interface` wrappers so each swap can
-independently choose legacy SPL Token or Token-2022 for asset and/or
-quote.
+independently use the legacy SPL Token program or Token-2022 for the
+asset and/or quote mint. See the
+[Solana terminology docs](https://solana.com/docs/terminology) for
+the vocabulary this builds on (PDAs, token accounts, mints).
 
 ## Oracle Integration
 
@@ -173,7 +203,7 @@ anchor build    # produces target/deploy/*.so
 cargo test      # 22 math unit tests + 12 LiteSVM integration tests
 ```
 
-Anchor.toml's `[scripts]` maps `anchor test` to `cargo test`, so
+`Anchor.toml`'s `[scripts]` maps `anchor test` to `cargo test`, so
 `anchor test` runs `anchor build` followed by the Rust test suite.
 
 On machines with limited RAM set `CARGO_BUILD_JOBS=1` during the first
@@ -181,16 +211,14 @@ compile to avoid linker OOMs.
 
 ## Design Trade-offs
 
-- **No upside payout to A from the collateral vault** — A's upside is
-  implicit in the appreciated asset, which returns to A intact. This is
-  the clean, balanced interpretation of the spec's "A gets asset back
-  + (B's collateral − pnl); B gets their collateral + pnl" (the literal
-  reading cannot balance because it requires paying out
-  `2 × B's collateral` from a vault that only contains
-  `B's collateral`). Party A effectively holds a protective put struck
-  at `P₀`; B sells that put and earns the taker fee as premium.
+- **Asymmetric settlement by design.** The collateral vault only pays
+  A on the downside — A's upside is the asset itself, which is always
+  returned intact. This is the correct semantics for a protective put,
+  not a compromise. A literal symmetric TRS (A also wins quote when
+  price rises) would need A to post quote collateral too; that's a
+  different product.
 - **Per-swap vaults, not pooled** — no socialised bad debt across
-  swaps. If P₁ crashes far below P₀ and `|pnl_B|` exceeds
+  swaps. If `P₁` crashes far below `P₀` and `|pnl_B|` exceeds
   `collateral_posted`, A receives at most `collateral_posted`; the
   uncovered portion is the cost of an insufficient initial margin.
 - **Liquidation bounty out of A's share** — A is the beneficiary of
@@ -199,6 +227,23 @@ compile to avoid linker OOMs.
 - **Entry price stored as raw Pyth `(price, exponent)` pair** — lets
   settlement reproduce the exact normalisation used at create time
   even if the Pyth exponent shifts between fill and expiry.
+
+## Limitations
+
+- **No symmetric upside payout to A.** See "What it isn't" above.
+  Party A's upside is the asset's appreciation, paid implicitly when
+  the locked asset returns at settlement.
+- **No partial fills.** One B per swap. Clients needing a
+  multi-counterparty hedge can open N swaps with independent ids.
+- **No Pyth SDK dependency.** Deliberately — the SDK pins
+  `anchor-lang = "0.32.1"` which conflicts with this workspace's
+  `anchor-lang = "1.0.0"`. Manual parse of `PriceUpdateV2` is ~30
+  lines, layout-stable and documented.
+- **No Node tooling.** No TypeScript tests, no Codama client
+  generation, no pnpm lockfile. The generated IDL lives at
+  `target/idl/synthetic_exposure.json` after `anchor build` — clients
+  that need typed TS bindings can run Codama on that IDL themselves
+  (out of scope for this example).
 
 ## File Layout
 

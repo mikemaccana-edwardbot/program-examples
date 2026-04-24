@@ -18,8 +18,9 @@ pub enum SwapStatus {
     Cancelled,
 }
 
-/// A single two-sided Total Return Swap between party A (the asset-locker /
-/// short side) and party B (the collateral-poster / long side).
+/// A single bilateral protective put between party A (put buyer — locks
+/// the asset and pays the premium) and party B (put writer — posts quote
+/// collateral and earns the premium).
 ///
 /// PDA seeds: `["swap", creator, swap_id_seed]` — the 8-byte `swap_id_seed`
 /// is client-supplied so one wallet can run many concurrent swaps.
@@ -27,16 +28,19 @@ pub enum SwapStatus {
 /// Vault PDAs owned by this Swap (as token authority):
 /// - Asset vault:       `["asset_vault", swap]` — holds A's locked asset.
 /// - Collateral vault:  `["collateral_vault", swap]` — holds B's posted
-///   quote collateral plus A's taker fee (until fill releases it to B).
+///   quote collateral plus A's pre-funded premium (until fill releases it to B).
 #[account]
 #[derive(InitSpace)]
 pub struct Swap {
-    /// Party A — the creator, asset-locker, effective SHORT on the asset.
-    /// Rent for the Swap account is refunded to this wallet on `cancel_swap`
-    /// (before fill) or left in place after settlement.
+    /// Party A — the creator, asset-locker, put buyer. Pays the premium
+    /// at create time and claims the put payoff from B's collateral at
+    /// settlement if the price has fallen. Rent for the Swap account is
+    /// refunded to this wallet on `cancel_swap` (before fill) or left
+    /// in place after settlement.
     pub party_a: Pubkey,
 
-    /// Party B — the collateral poster and counterparty. `None` until
+    /// Party B — the put writer. Posts quote-token collateral that funds
+    /// A's downside claim, receives the premium at fill. `None` until
     /// `fill_swap`, after which it is set and never changed.
     pub party_b: Option<Pubkey>,
 
@@ -79,19 +83,21 @@ pub struct Swap {
     /// used by `liquidate` and `settle_swap`.
     pub collateral_posted: u64,
 
-    /// Upfront fee party A pays to party B at fill, in quote-mint atoms.
-    /// Rationale: compensates B for warehousing risk between fill and
-    /// expiry. Transferred from the collateral vault to B's token account
-    /// at fill — A pre-funds it into the collateral vault at create time
-    /// so the program never needs to coordinate a separate transfer.
-    pub taker_fee: u64,
+    /// Option premium party A (put buyer) pays party B (put writer) at
+    /// fill, in quote-mint atoms. Economically: A is buying a cash-settled
+    /// protective put on the locked asset; the premium is B's compensation
+    /// for taking on the downside risk between fill and expiry. Transferred
+    /// from the collateral vault to B's token account at fill — A pre-funds
+    /// it into the collateral vault at create time so the program never
+    /// needs to coordinate a separate transfer.
+    pub premium: u64,
 
     /// Unix timestamp at which the swap matures and `settle_swap` becomes
     /// callable by either party.
     pub expiry_ts: i64,
 
     /// Deadline for party B to fill the swap. After this timestamp party A
-    /// can reclaim their asset + fee via `cancel_swap`, even without B ever
+    /// can reclaim their asset + premium via `cancel_swap`, even without B ever
     /// having cancelled explicitly. Must satisfy `< expiry_ts`.
     pub fill_deadline_ts: i64,
 

@@ -1,4 +1,4 @@
-//! Integration tests for the synthetic_exposure TRS primitive.
+//! Integration tests for the synthetic_exposure protective-put primitive.
 //!
 //! Each test boots a fresh LiteSVM, loads the compiled synthetic_exposure
 //! and mock_pyth .so files, seeds a Pyth-owned price account directly via
@@ -252,7 +252,7 @@ fn ix_create_swap(
     swap_id_seed: [u8; 8],
     amount_asset: u64,
     required_collateral: u64,
-    taker_fee: u64,
+    premium: u64,
     expiry_ts: i64,
     fill_deadline_ts: i64,
 ) -> SwapFixture {
@@ -267,7 +267,7 @@ fn ix_create_swap(
             swap_id_seed,
             amount_asset,
             required_collateral,
-            taker_fee,
+            premium,
             expiry_ts,
             fill_deadline_ts,
             pyth_feed_id: feed_id,
@@ -546,7 +546,7 @@ struct SwapSnapshot {
     notional_quote: u64,
     _required_collateral: u64,
     collateral_posted: u64,
-    _taker_fee: u64,
+    _premium: u64,
     _expiry_ts: i64,
     _fill_deadline_ts: i64,
     _pyth_feed_id: [u8; 32],
@@ -573,12 +573,12 @@ fn fetch_swap(svm: &LiteSVM, swap: &Pubkey) -> SwapSnapshot {
 // Standardised numbers used across the scenario tests to keep the math in
 // one place: 1 whole asset unit at $100 ⇒ notional = 100 USDC =
 // 100_000_000 quote atoms. At 30% initial margin the minimum collateral
-// is 30 USDC; taker fee of 1 USDC (1% of notional) sits comfortably below
-// the 5% MAX_TAKER_FEE_BPS ceiling.
+// is 30 USDC; premium of 1 USDC (1% of notional) sits comfortably below
+// the 5% MAX_PREMIUM_BPS ceiling.
 const TEST_ASSET_AMOUNT: u64 = 1; // whole asset units before decimals
 const TEST_ENTRY_PRICE: i64 = 100;
 const TEST_COLLATERAL: u64 = 30; // whole USDC
-const TEST_FEE: u64 = 1; // whole USDC
+const TEST_PREMIUM: u64 = 1; // whole USDC
 
 fn standard_swap_times(svm: &LiteSVM) -> (i64, i64) {
     // Fill deadline 1 hour out, expiry 2 hours. Plenty of room for tests
@@ -594,10 +594,10 @@ fn creates_a_swap_and_locks_the_asset() {
 
     let party_a = create_wallet(&mut svm, 1_000_000_000).unwrap();
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
     let fix = ix_create_swap(
@@ -611,7 +611,7 @@ fn creates_a_swap_and_locks_the_asset() {
         [1u8; 8],
         asset_amount,
         usdc(TEST_COLLATERAL),
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -621,7 +621,7 @@ fn creates_a_swap_and_locks_the_asset() {
     assert_eq!(get_token_account_balance(&svm, &a_asset).unwrap(), 0);
 
     // Fee pre-funded into the collateral vault.
-    assert_eq!(get_token_account_balance(&svm, &fix.collateral_vault).unwrap(), fee_atoms);
+    assert_eq!(get_token_account_balance(&svm, &fix.collateral_vault).unwrap(), premium_atoms);
 
     let snapshot = fetch_swap(&svm, &fix.swap);
     assert_eq!(snapshot.status, SwapStatus::Created);
@@ -632,7 +632,7 @@ fn creates_a_swap_and_locks_the_asset() {
 }
 
 #[test]
-fn fills_a_swap_and_transfers_taker_fee() {
+fn fills_a_swap_and_transfers_premium() {
     let (mut svm, authority) = setup();
     let (asset_mint, quote_mint, feed_id) = setup_market(&mut svm, &authority, 2, TEST_ENTRY_PRICE);
 
@@ -640,11 +640,11 @@ fn fills_a_swap_and_transfers_taker_fee() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -659,7 +659,7 @@ fn fills_a_swap_and_transfers_taker_fee() {
         [2u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -673,7 +673,7 @@ fn fills_a_swap_and_transfers_taker_fee() {
         get_token_account_balance(&svm, &fix.collateral_vault).unwrap(),
         collateral_atoms
     );
-    assert_eq!(get_token_account_balance(&svm, &b_quote).unwrap(), fee_atoms);
+    assert_eq!(get_token_account_balance(&svm, &b_quote).unwrap(), premium_atoms);
 
     let snapshot = fetch_swap(&svm, &fix.swap);
     assert_eq!(snapshot.status, SwapStatus::Active);
@@ -689,10 +689,10 @@ fn cancels_an_unfilled_swap_and_refunds_party_a() {
     let party_a = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
     let fix = ix_create_swap(
@@ -706,7 +706,7 @@ fn cancels_an_unfilled_swap_and_refunds_party_a() {
         [3u8; 8],
         asset_amount,
         usdc(TEST_COLLATERAL),
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -715,7 +715,7 @@ fn cancels_an_unfilled_swap_and_refunds_party_a() {
 
     // A fully refunded: asset back, fee back, vaults empty.
     assert_eq!(get_token_account_balance(&svm, &a_asset).unwrap(), asset_amount);
-    assert_eq!(get_token_account_balance(&svm, &a_quote).unwrap(), fee_atoms);
+    assert_eq!(get_token_account_balance(&svm, &a_quote).unwrap(), premium_atoms);
     assert_eq!(get_token_account_balance(&svm, &fix.asset_vault).unwrap(), 0);
     assert_eq!(get_token_account_balance(&svm, &fix.collateral_vault).unwrap(), 0);
 
@@ -731,11 +731,11 @@ fn settles_with_price_appreciation_party_b_wins() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -750,7 +750,7 @@ fn settles_with_price_appreciation_party_b_wins() {
         [4u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -773,7 +773,7 @@ fn settles_with_price_appreciation_party_b_wins() {
     // B got their collateral + the fee they already received at fill.
     assert_eq!(
         get_token_account_balance(&svm, &b_quote).unwrap(),
-        collateral_atoms + fee_atoms
+        collateral_atoms + premium_atoms
     );
     assert_eq!(fetch_swap(&svm, &fix.swap).status, SwapStatus::Settled);
 }
@@ -787,11 +787,11 @@ fn settles_with_price_depreciation_party_a_wins() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -806,7 +806,7 @@ fn settles_with_price_depreciation_party_a_wins() {
         [5u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -825,7 +825,7 @@ fn settles_with_price_depreciation_party_a_wins() {
     // B keeps the remaining 10 USDC plus the fee they received at fill.
     assert_eq!(
         get_token_account_balance(&svm, &b_quote).unwrap(),
-        usdc(10) + fee_atoms
+        usdc(10) + premium_atoms
     );
     assert_eq!(fetch_swap(&svm, &fix.swap).status, SwapStatus::Settled);
 }
@@ -839,11 +839,11 @@ fn settles_with_party_b_wiped_out_exactly() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -858,7 +858,7 @@ fn settles_with_party_b_wiped_out_exactly() {
         [6u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -875,7 +875,7 @@ fn settles_with_party_b_wiped_out_exactly() {
 
     assert_eq!(get_token_account_balance(&svm, &a_asset).unwrap(), asset_amount);
     assert_eq!(get_token_account_balance(&svm, &a_quote).unwrap(), collateral_atoms);
-    assert_eq!(get_token_account_balance(&svm, &b_quote).unwrap(), fee_atoms);
+    assert_eq!(get_token_account_balance(&svm, &b_quote).unwrap(), premium_atoms);
     assert_eq!(get_token_account_balance(&svm, &fix.collateral_vault).unwrap(), 0);
 }
 
@@ -889,11 +889,11 @@ fn liquidates_when_party_b_goes_underwater_mid_term() {
     let liquidator = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
     let liquidator_quote = fund(&mut svm, &authority, &liquidator.pubkey(), &quote_mint, 0);
 
@@ -909,7 +909,7 @@ fn liquidates_when_party_b_goes_underwater_mid_term() {
         [7u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -944,7 +944,7 @@ fn liquidates_when_party_b_goes_underwater_mid_term() {
     // B keeps the residual 5 USDC plus the fee they already received.
     assert_eq!(
         get_token_account_balance(&svm, &b_quote).unwrap(),
-        usdc(5) + fee_atoms
+        usdc(5) + premium_atoms
     );
     assert_eq!(get_token_account_balance(&svm, &a_asset).unwrap(), asset_amount);
     assert_eq!(fetch_swap(&svm, &fix.swap).status, SwapStatus::Settled);
@@ -960,12 +960,12 @@ fn adding_collateral_restores_health_and_blocks_liquidation() {
     let liquidator = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
     let top_up = usdc(20);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(
         &mut svm,
         &authority,
@@ -987,7 +987,7 @@ fn adding_collateral_restores_health_and_blocks_liquidation() {
         [8u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -1029,11 +1029,11 @@ fn rejects_fill_with_insufficient_collateral() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -1048,7 +1048,7 @@ fn rejects_fill_with_insufficient_collateral() {
         [9u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -1072,11 +1072,11 @@ fn rejects_settle_before_expiry() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -1091,7 +1091,7 @@ fn rejects_settle_before_expiry() {
         [10u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -1120,11 +1120,11 @@ fn rejects_stale_oracle_at_settle() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -1139,7 +1139,7 @@ fn rejects_stale_oracle_at_settle() {
         [11u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );
@@ -1169,11 +1169,11 @@ fn rejects_cancel_after_swap_filled() {
     let party_b = create_wallet(&mut svm, 1_000_000_000).unwrap();
 
     let asset_amount = whole_asset(TEST_ASSET_AMOUNT);
-    let fee_atoms = usdc(TEST_FEE);
+    let premium_atoms = usdc(TEST_PREMIUM);
     let collateral_atoms = usdc(TEST_COLLATERAL);
 
     let a_asset = fund(&mut svm, &authority, &party_a.pubkey(), &asset_mint, asset_amount);
-    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, fee_atoms);
+    let a_quote = fund(&mut svm, &authority, &party_a.pubkey(), &quote_mint, premium_atoms);
     let b_quote = fund(&mut svm, &authority, &party_b.pubkey(), &quote_mint, collateral_atoms);
 
     let (fill_deadline, expiry) = standard_swap_times(&svm);
@@ -1188,7 +1188,7 @@ fn rejects_cancel_after_swap_filled() {
         [12u8; 8],
         asset_amount,
         collateral_atoms,
-        fee_atoms,
+        premium_atoms,
         expiry,
         fill_deadline,
     );

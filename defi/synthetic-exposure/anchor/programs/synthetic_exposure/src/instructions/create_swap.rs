@@ -1,4 +1,4 @@
-//! `create_swap` — party A locks the asset, pre-funds the taker fee, and
+//! `create_swap` — party A locks the asset, pre-funds the premium, and
 //! opens a new Swap in the `Created` state.
 //!
 //! Reading the oracle at create time locks in `P₀`. The asset's notional
@@ -6,7 +6,7 @@
 //! later instructions don't need to re-derive it (and so no price drift
 //! between create and read-only views changes the economics).
 //!
-//! The caller pre-funds the `taker_fee` into the collateral vault at
+//! The caller pre-funds the `premium` into the collateral vault at
 //! create time. That keeps the fee path single-hop at `fill_swap` — B
 //! just sweeps the fee out of the collateral vault, no separate transfer
 //! from A is required. If the swap is cancelled before fill, the fee
@@ -19,7 +19,7 @@ use anchor_spl::token_interface::{
 
 use crate::constants::{
     ASSET_VAULT_SEED, BPS_DENOMINATOR, COLLATERAL_VAULT_SEED, INITIAL_MARGIN_BPS,
-    MAX_TAKER_FEE_BPS, SWAP_SEED,
+    MAX_PREMIUM_BPS, SWAP_SEED,
 };
 use crate::errors::ErrorCode;
 use crate::math::compute_notional_quote;
@@ -31,7 +31,7 @@ pub fn create_swap(
     swap_id_seed: [u8; 8],
     amount_asset: u64,
     required_collateral: u64,
-    taker_fee: u64,
+    premium: u64,
     expiry_ts: i64,
     fill_deadline_ts: i64,
     pyth_feed_id: [u8; 32],
@@ -76,15 +76,15 @@ pub fn create_swap(
         ErrorCode::CollateralBelowInitialMargin
     );
 
-    // Taker fee capped as a fraction of notional. A client bug that set
-    // the fee equal to notional would otherwise silently transfer A's
+    // Premium capped as a fraction of notional. A client bug that set
+    // the premium equal to notional would otherwise silently transfer A's
     // entire hedge value to B.
-    let max_fee: u128 = (notional_quote as u128)
-        .checked_mul(MAX_TAKER_FEE_BPS)
+    let max_premium: u128 = (notional_quote as u128)
+        .checked_mul(MAX_PREMIUM_BPS)
         .ok_or_else(|| error!(ErrorCode::MathOverflow))?
         .checked_div(BPS_DENOMINATOR)
         .ok_or_else(|| error!(ErrorCode::MathOverflow))?;
-    require!((taker_fee as u128) <= max_fee, ErrorCode::TakerFeeTooHigh);
+    require!((premium as u128) <= max_premium, ErrorCode::PremiumTooHigh);
 
     // Transfer asset: A → asset_vault.
     transfer_checked(
@@ -101,10 +101,10 @@ pub fn create_swap(
         context.accounts.asset_mint.decimals,
     )?;
 
-    // Pre-fund the taker fee into the collateral vault (if non-zero) so
+    // Pre-fund the premium into the collateral vault (if non-zero) so
     // `fill_swap` doesn't need an extra signer from A. The fee will either
     // go to B at fill or back to A at cancel.
-    if taker_fee > 0 {
+    if premium > 0 {
         transfer_checked(
             CpiContext::new(
                 context.accounts.quote_token_program.key(),
@@ -115,7 +115,7 @@ pub fn create_swap(
                     authority: context.accounts.party_a.to_account_info(),
                 },
             ),
-            taker_fee,
+            premium,
             context.accounts.quote_mint.decimals,
         )?;
     }
@@ -133,7 +133,7 @@ pub fn create_swap(
     swap.notional_quote = notional_quote;
     swap.required_collateral = required_collateral;
     swap.collateral_posted = 0;
-    swap.taker_fee = taker_fee;
+    swap.premium = premium;
     swap.expiry_ts = expiry_ts;
     swap.fill_deadline_ts = fill_deadline_ts;
     swap.pyth_feed_id = pyth_feed_id;

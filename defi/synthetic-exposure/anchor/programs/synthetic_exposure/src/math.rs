@@ -1,4 +1,4 @@
-//! Integer math for the two-sided TRS primitive.
+//! Integer math for the protective-put primitive.
 //!
 //! Zero floating point anywhere; everything is u128/i128 with overflow
 //! checks. The helpers here are the single source of truth for:
@@ -146,7 +146,7 @@ pub fn compute_pnl_b(
 /// - `pnl_b < 0` (price fell, A's short position wins): A claims
 ///   `min(|pnl_b|, collateral_posted)` from the collateral vault; B keeps
 ///   the remainder. This is the "downside-protection" leg — A paid the
-///   taker fee to insure against a price fall, B's collateral funds that
+///   premium to insure against a price fall, B's collateral funds that
 ///   insurance.
 pub fn split_collateral_at_settlement(
     collateral_posted: u64,

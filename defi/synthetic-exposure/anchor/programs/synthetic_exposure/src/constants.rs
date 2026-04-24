@@ -1,4 +1,4 @@
-//! Named constants for the synthetic-exposure total-return-swap primitive.
+//! Named constants for the synthetic-exposure protective-put primitive.
 //!
 //! Every magic number the program and its tests touch lives here with a
 //! short justification. Keep it flat — no feature flags, no config knobs —
@@ -47,10 +47,10 @@ pub const MAINTENANCE_MARGIN_BPS: u128 = 1_000;
 /// performing A's work for them.
 pub const LIQUIDATION_BOUNTY_BPS: u128 = 500;
 
-/// Hard cap on the taker fee party A may offer at create time. 500 bps of
+/// Hard cap on the premium party A may offer at create time. 500 bps of
 /// notional = 5%. Anything above this almost certainly reflects a client
 /// bug (e.g. confusing a dollar amount with basis points) so we refuse.
-pub const MAX_TAKER_FEE_BPS: u128 = 500;
+pub const MAX_PREMIUM_BPS: u128 = 500;
 
 /// Maximum staleness, in seconds, for a Pyth price update before the
 /// program refuses to use it. 60 seconds matches Pyth's own suggested

@@ -25,8 +25,8 @@ pub enum ErrorCode {
     #[msg("Required collateral is below the initial-margin floor")]
     CollateralBelowInitialMargin,
 
-    #[msg("Taker fee exceeds the protocol maximum")]
-    TakerFeeTooHigh,
+    #[msg("Premium exceeds the protocol maximum")]
+    PremiumTooHigh,
 
     #[msg("Expiry timestamp must be strictly in the future")]
     ExpiryInPast,

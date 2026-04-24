@@ -1,5 +1,5 @@
 //! `fill_swap` — party B posts the required collateral, receives the
-//! taker fee pre-funded by A, and activates the swap.
+//! premium pre-funded by A, and activates the swap.
 //!
 //! Only callable while the swap is in `Created` state and the fill
 //! deadline hasn't passed. The collateral transferred must be at least
@@ -46,10 +46,10 @@ pub fn fill_swap(
         context.accounts.quote_mint.decimals,
     )?;
 
-    // Release pre-funded taker fee from the collateral vault to B. The
+    // Release pre-funded premium from the collateral vault to B. The
     // Swap PDA is the vault's token authority, so we sign with its seeds.
-    let taker_fee = swap.taker_fee;
-    if taker_fee > 0 {
+    let premium = swap.premium;
+    if premium > 0 {
         let party_a_key = swap.party_a;
         let swap_id_seed = swap.swap_id_seed;
         let swap_bump = [swap.bump];
@@ -71,7 +71,7 @@ pub fn fill_swap(
                 },
                 signer,
             ),
-            taker_fee,
+            premium,
             context.accounts.quote_mint.decimals,
         )?;
     }
