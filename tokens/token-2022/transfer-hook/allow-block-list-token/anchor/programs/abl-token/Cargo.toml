@@ -19,12 +19,10 @@ anchor-debug = []
 custom-heap = []
 custom-panic = []
 
-
 [dependencies]
-# Anchor 1.0.0-rc.5 — pin to RC until stable release
 # interface-instructions feature removed in Anchor 1.0
-anchor-lang = "1.0.0-rc.5"
-anchor-spl = { version = "1.0.0-rc.5", features = [
+anchor-lang = "1.0.1"
+anchor-spl = { version = "1.0.1", features = [
     "token_2022_extensions",
     "token_2022",
 ] }
