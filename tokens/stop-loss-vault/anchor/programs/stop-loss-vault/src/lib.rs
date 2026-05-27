@@ -12,6 +12,30 @@ pub mod error;
 pub mod instructions;
 pub mod state;
 
+// Codama-generated typed Rust clients for the TukTuk task-queue program
+// (`tuktuk_client`) and the Cron program (`cron_client`). Both are
+// auto-generated from upstream Anchor IDLs vendored under `anchor/idls/`.
+// Re-run `node scripts/codama-gen-tuktuk.mjs` to refresh them. Edit by hand
+// at your peril — changes will be wiped on the next regen.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    dead_code,
+    non_snake_case,
+    unused_imports,
+    rustdoc::broken_intra_doc_links
+)]
+pub mod cron_client;
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_lifetimes,
+    dead_code,
+    non_snake_case,
+    unused_imports,
+    rustdoc::broken_intra_doc_links
+)]
+pub mod tuktuk_client;
+
 use anchor_lang::prelude::*;
 
 pub use constants::*;
